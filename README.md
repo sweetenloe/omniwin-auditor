@@ -88,6 +88,48 @@ You’ll get several files, all timestamped and easy to read:
    * gpo-[OSNAME].html	(Group Policy in HTML	Easy visual reference)
    * auditpolicy-[OSNAME].txt	(Audit policy export	Compliance / logging checks)
 
+### Example of an audit export:
+Here's what the main audit report looks like:
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Windows Security Audit Report - DESKTOP-ABC123</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .header { background-color: #f0f0f0; padding: 15px; border-radius: 5px; }
+        .section { margin: 20px 0; }
+        .pass { color: green; font-weight: bold; }
+        .warn { color: orange; font-weight: bold; }
+        .fail { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Security Audit Report</h1>
+        <p><strong>Computer:</strong> DESKTOP-ABC123</p>
+        <p><strong>Scan Date:</strong> 2025-09-28 14:32:15</p>
+        <p><strong>Windows Version:</strong> Windows 11 Pro (22H2)</p>
+    </div>
+    
+    <div class="section">
+        <h2>Password Policy</h2>
+        <p>Minimum Password Length: <span class="warn">8 characters (Recommended: 12+)</span></p>
+        <p>Password Complexity: <span class="pass">Enabled</span></p>
+        <p>Account Lockout Threshold: <span class="fail">Disabled (Security Risk)</span></p>
+    </div>
+    
+    <div class="section">
+        <h2>Windows Defender</h2>
+        <p>Real-time Protection: <span class="pass">Enabled</span></p>
+        <p>Firewall Status: <span class="pass">Active</span></p>
+        <p>Last Scan: <span class="pass">2025-09-28 06:00:00</span></p>
+    </div>
+</body>
+</html>
+```
+
 📋 Requirements
 
     PowerShell 5.0 or newer (built into Windows 10/11)
