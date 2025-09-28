@@ -81,12 +81,13 @@ Compliance & Reporting
 📁 Reports
 
 You’ll get several files, all timestamped and easy to read:
-File	
+
 **What it is and Why it matters**
-audit-[COMPUTERNAME].txt	Full security report	Main summary + details
-secpol-[OSNAME].cfg	Policy export	Backup and review
-gpo-[OSNAME].html	Group Policy in HTML	Easy visual reference
-auditpolicy-[OSNAME].txt	Audit policy export	Compliance / logging checks
+   * audit-[COMPUTERNAME].txt (Full security report	Main summary + details)
+   * secpol-[OSNAME].cfg	(Policy export	Backup and review)
+   * gpo-[OSNAME].html	(Group Policy in HTML	Easy visual reference)
+   * auditpolicy-[OSNAME].txt	(Audit policy export	Compliance / logging checks)
+
 📋 Requirements
 
     PowerShell 5.0 or newer (built into Windows 10/11)
@@ -135,5 +136,6 @@ Ideas, bug fixes, or new checks are welcome:
 
 Released under the MIT License. Free to use, modify, and share—at your own risk.
 🔧 Troubleshooting
+
 
 If secedit logs fail, the tool will automatically fall back and grab the data another way. No manual fixing needed.
