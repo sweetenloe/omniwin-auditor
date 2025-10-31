@@ -454,45 +454,690 @@ function Get-Remediation($item){
 }
 
 function OwO-ConvertAuditToHtml{
-  param([Parameter(Mandatory=$true)][string]$InputPath,[Parameter(Mandatory=$true)][string]$OutputPath,[string]$Title='Audit Report',[switch]$UseFriendlyNames,[string]$MappingPath,[switch]$IncludeCode)
+  param(
+    [Parameter(Mandatory=$true)][string]$InputPath,
+    [Parameter(Mandatory=$true)][string]$OutputPath,
+    [string]$Title='Audit Report',
+    [switch]$UseFriendlyNames,
+    [string]$MappingPath,
+    [switch]$IncludeCode
+  )
   if(-not(Test-Path -LiteralPath $InputPath)){throw "Input file not found: $InputPath"}
   if(-not $PSBoundParameters.ContainsKey('Title') -or [string]::IsNullOrWhiteSpace($Title)){$Title=Get-DefaultTitle -path $InputPath}
+
   $lines=Get-Content -LiteralPath $InputPath|Where-Object{$_ -match ';'}
   $items=@();foreach($line in $lines){$p=Parse-Line $line;if($null -ne $p){$items+=$p}}
   $map=$null;if($UseFriendlyNames){$map=Load-Mapping -mapPath $MappingPath}
   $groups=[ordered]@{};foreach($it in $items){if(-not $groups.Contains($it.Code)){$groups[$it.Code]=[System.Collections.Generic.List[object]]::new()};$null=$groups[$it.Code].Add($it)}
+
+  $findings=@()
+  foreach($code in $groups.Keys){
+    $bucket=$groups[$code]
+    if($bucket.Count -eq 0){continue}
+    $header= if($UseFriendlyNames){Get-FriendlyHeader -code $code -map $map -includeCode:$IncludeCode}else{$code}
+    $importance=Rank-Importance $bucket[0]
+    $findings+=[pscustomobject]@{Code=$code;Header=$header;Importance=$importance;Items=$bucket}
+  }
+
+  $counts=@{High=0;Medium=0;Low=0}
+  foreach($f in $findings){
+    if($counts.ContainsKey($f.Importance)){$counts[$f.Importance]++}else{$counts[$f.Importance]=1}
+  }
+  foreach($key in @('High','Medium','Low')){if(-not $counts.ContainsKey($key)){$counts[$key]=0}}
+
+  $totalFindings=$findings.Count
+  $totalItems=$items.Count
+  $weighted=($counts.High*25)+($counts.Medium*15)+($counts.Low*8)
+  if($totalFindings -gt 0 -and $weighted -le 0){
+    $weighted=[math]::Round((($counts.High*3)+($counts.Medium*2)+$counts.Low)*100.0/($totalFindings*3),0)
+  }
+  $riskScore=[math]::Min(100,[math]::Round([double]$weighted,0))
+  $riskLabel=if($riskScore -ge 80){'Severe Exposure'}elseif($riskScore -ge 55){'Elevated Exposure'}elseif($riskScore -ge 35){'Guarded'}elseif($riskScore -gt 0){'Low Exposure'}else{'Stable'}
+  $riskProgress=if($riskScore -gt 0){$riskScore}else{5}
+
+  $fileInfo=Get-Item -LiteralPath $InputPath
+  $generatedAt=Get-Date
+  $reportId=[IO.Path]::GetFileNameWithoutExtension($OutputPath)
+  $inputName=$fileInfo.Name
+  $outputName=[IO.Path]::GetFileName($OutputPath)
+  $profileName=''
+  if($Title -match '-\s*(.+)$'){$profileName=$Matches[1].Trim()}
+  if(-not $profileName){$profileName=Split-Path -Leaf $InputPath}
+  $defaultTitle=Get-DefaultTitle -path $InputPath
+  $machineName=''
+  if($defaultTitle -match 'Audit Report -\s*(.+)'){$machineName=$Matches[1].Trim()}
+  if(-not $machineName){$machineName='Target host not captured'}
+  $auditDateUtc=$fileInfo.LastWriteTimeUtc
+  $auditDateDisplay=try{$auditDateUtc.ToString('yyyy-MM-dd HH:mm')}catch{'--'}
+  $auditDateDisplay+=$auditDateDisplay -ne '--' ? ' UTC' : ''
+
+  $friendlyMode=if($UseFriendlyNames){'Enabled'}else{'Disabled'}
+  $codeMode=if($IncludeCode){'Included inline'}else{'Hidden'}
+
+  $bySeverity=@{
+    High=[System.Collections.Generic.List[object]]::new()
+    Medium=[System.Collections.Generic.List[object]]::new()
+    Low=[System.Collections.Generic.List[object]]::new()
+  }
+  foreach($finding in $findings){
+    if(-not $bySeverity.ContainsKey($finding.Importance)){
+      $bySeverity[$finding.Importance]=[System.Collections.Generic.List[object]]::new()
+    }
+    $null=$bySeverity[$finding.Importance].Add($finding)
+  }
+
+  $resolveCategory={
+    param($code,$mapping)
+    $parts=Get-CodeParts $code
+    if($mapping -and $mapping.Prefixes){
+      $match=$mapping.Prefixes|Where-Object{$parts.Letters -and ($parts.Letters -like ("$($_.Prefix)*"))}|Select-Object -First 1
+      if($match){return $match.Name}
+    }
+    if($parts.Letters){return $parts.Letters.ToUpperInvariant()}
+    'General'
+  }
+
+  $filterChips=[System.Collections.Generic.List[string]]::new()
+  if($bySeverity.High.Count -gt 0){$filterChips.Add("<a class='chip high' href='#high-findings'>High ($($bySeverity.High.Count))</a>")}
+  if($bySeverity.Medium.Count -gt 0){$filterChips.Add("<a class='chip medium' href='#medium-findings'>Medium ($($bySeverity.Medium.Count))</a>")}
+  if($bySeverity.Low.Count -gt 0){$filterChips.Add("<a class='chip low' href='#low-findings'>Low ($($bySeverity.Low.Count))</a>")}
+  $filterChips.Add("<a class='chip timeline' href='#timeline'>Timeline</a>")
+  $filterMarkup=[string]::Join([Environment]::NewLine,$filterChips)
+
+  $validCreation=$fileInfo.CreationTimeUtc
+  $timeline=@()
+  if($validCreation -gt [datetime]'2000-01-01'){
+    $timeline+=[pscustomobject]@{Time=$validCreation;Desc="Source log captured (`$inputName`)"}
+  }
+  $timeline+=[pscustomobject]@{Time=$fileInfo.LastWriteTimeUtc;Desc="$totalItems finding record(s) parsed and grouped"}
+  $timeline+=[pscustomobject]@{Time=$generatedAt.ToUniversalTime();Desc="HTML report generated (`$outputName`)"}
+  $fmtTime={param($ts)if(-not $ts){return '--:--'};try{return ($ts.ToLocalTime()).ToString('HH:mm')}catch{return $ts.ToString()}}
+
   $css=@"
-body{font-family:Segoe UI,Arial,sans-serif;margin:24px;background:#f7f7fb;color:#222}
-h1{margin-top:0}
-.policy{background:#fff;border:1px solid #e5e7eb;border-radius:8px;margin:14px 0;padding:16px}
-.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-.title{font-size:18px;font-weight:600}
-.badge{padding:2px 8px;border-radius:12px;font-size:12px;color:#fff}
-.High{background:#dc2626}.Medium{background:#d97706}.Low{background:#6b7280}
-.desc{margin:8px 0}
-.cmd{background:#0f172a;color:#e2e8f0;padding:10px;border-radius:6px;font-family:Consolas,monospace;white-space:pre-wrap}
-.meta{font-size:12px;color:#444;margin-top:6px}
+:root{
+  color-scheme: light dark;
+  --bg:#f3f4f9;
+  --surface:#ffffff;
+  --surface-soft:#f8f9fc;
+  --border:#d8dde7;
+  --text:#1f2937;
+  --muted:#5f6b7d;
+  --accent:#2563eb;
+  --accent-dark:#1d4ed8;
+  --high:#e11d48;
+  --medium:#f97316;
+  --low:#059669;
+  --info:#0ea5e9;
+  --masthead-gradient:linear-gradient(135deg,#111827 0%,#1e3a8a 55%,#2563eb 100%);
+  --masthead-text:#e2e8f0;
+  --subtitle:rgba(226,232,240,0.8);
+  --masthead-meta-bg:rgba(15,23,42,0.4);
+  --risk-label-bg:rgba(225,29,72,0.12);
+  --risk-score-glow:radial-gradient(circle at top right,rgba(37,99,235,0.1),transparent 55%);
+  --pre-bg:#0f172a;
+  --pre-text:#e2e8f0;
+  --shadow:0 12px 30px rgba(15,23,42,0.12);
+  --legend-bg:#f8faff;
+  --legend-border:rgba(148,163,184,0.38);
+  --chip-bg:#e0e7ff;
+  --chip-border:rgba(37,99,235,0.35);
+  --chip-text:#1d4ed8;
+  --chip-hover-bg:rgba(37,99,235,0.08);
+  --badge-bg:rgba(226,232,240,0.18);
+  --badge-border:rgba(148,163,184,0.45);
+  --badge-text:#f8fafc;
+  --table-divider:#e5e7eb;
+  font-family:"Segoe UI","Inter","Roboto",system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.6;
+}
+.page{
+  max-width:960px;
+  margin:48px auto;
+  padding:0 32px 64px;
+}
+.masthead{
+  background:var(--masthead-gradient);
+  color:var(--masthead-text);
+  border-radius:18px;
+  padding:32px 36px;
+  box-shadow:var(--shadow);
+  display:grid;
+  grid-template-columns:minmax(260px,1fr) minmax(220px,auto);
+  gap:28px;
+  align-items:start;
+}
+.brand{
+  display:flex;
+  align-items:center;
+  gap:20px;
+  min-width:260px;
+}
+.brand-mark{
+  width:60px;
+  height:60px;
+  border-radius:16px;
+  background:rgba(226,232,240,0.12);
+  display:grid;
+  place-items:center;
+  font-weight:600;
+  font-size:1.35rem;
+  letter-spacing:1px;
+}
+.brand h1{
+  margin:0;
+  font-size:1.65rem;
+}
+.brand .subtitle{
+  margin:6px 0 0;
+  font-size:0.95rem;
+  color:var(--subtitle);
+}
+.brand .tagline{
+  margin:10px 0 0;
+  font-size:0.9rem;
+  color:var(--subtitle);
+  letter-spacing:0.01em;
+}
+.masthead-meta{
+  display:grid;
+  gap:6px;
+  font-size:0.95rem;
+  margin-left:auto;
+  min-width:220px;
+}
+.masthead-meta span{
+  background:var(--masthead-meta-bg);
+  padding:6px 10px;
+  border-radius:10px;
+}
+.masthead-badges{
+  grid-column:1 / -1;
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  justify-content:flex-end;
+}
+.report-badge{
+  border:1px solid var(--badge-border);
+  background:var(--badge-bg);
+  color:var(--badge-text);
+  font-size:0.8rem;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+  padding:6px 14px;
+  border-radius:999px;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+}
+.report-badge::before{
+  content:"";
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:var(--info);
+  box-shadow:0 0 8px rgba(14,165,233,0.35);
+}
+.report-badge.draft::before{background:var(--medium);}
+.section-title{
+  margin:48px 0 16px;
+  font-size:1.35rem;
+  font-weight:600;
+  letter-spacing:0.025em;
+  text-transform:uppercase;
+  color:var(--text);
+}
+.summary-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:20px;
+}
+.summary-subgrid{
+  margin-top:20px;
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  gap:20px;
+}
+.card{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:24px;
+  box-shadow:0 2px 12px rgba(15,23,42,0.05);
+}
+.card h3{
+  margin:0;
+  font-size:1.1rem;
+  font-weight:600;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+.risk-score{
+  position:relative;
+  overflow:hidden;
+}
+.risk-score::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:var(--risk-score-glow);
+  pointer-events:none;
+}
+.risk-value{
+  margin:16px 0 4px;
+  font-size:2.25rem;
+  font-weight:700;
+  letter-spacing:0.02em;
+}
+.risk-label{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:6px 12px;
+  border-radius:999px;
+  font-size:0.95rem;
+  background:var(--risk-label-bg);
+  color:var(--high);
+}
+.risk-label::before{
+  content:"";
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:var(--high);
+}
+.progress-bar{
+  background:var(--surface-soft);
+  border-radius:999px;
+  margin-top:18px;
+  height:10px;
+  overflow:hidden;
+}
+.progress-bar span{
+  display:block;
+  height:100%;
+  background:linear-gradient(90deg,var(--accent),var(--accent-dark));
+}
+.badge{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  font-size:0.9rem;
+  font-weight:600;
+  padding:4px 12px;
+  border-radius:999px;
+  color:#fff;
+}
+.badge.high{background:var(--high)}
+.badge.medium{background:var(--medium)}
+.badge.low{background:var(--low)}
+.badge.info{background:var(--info)}
+.metrics{
+  display:grid;
+  gap:12px;
+  margin-top:18px;
+}
+.metrics-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  font-size:0.95rem;
+}
+.metrics-bar{
+  width:55%;
+  min-width:180px;
+  height:8px;
+  border-radius:999px;
+  background:var(--surface-soft);
+  overflow:hidden;
+}
+.metrics-bar span{
+  display:block;
+  height:100%;
+}
+.metrics-card .badge{font-size:0.75rem;padding:3px 10px;}
+.metrics-table{
+  width:100%;
+  border-collapse:collapse;
+  margin-top:12px;
+}
+.metrics-table tr + tr{border-top:1px solid var(--table-divider);}
+.metrics-table th{
+  text-align:left;
+  font-size:0.85rem;
+  font-weight:600;
+  color:var(--muted);
+  padding:8px 0;
+  text-transform:uppercase;
+  letter-spacing:0.05em;
+}
+.metrics-table td{
+  font-size:0.95rem;
+  padding:8px 0;
+  color:var(--text);
+}
+.legend-card{
+  background:var(--legend-bg);
+  border:1px solid var(--legend-border);
+}
+.legend-list{
+  list-style:none;
+  margin:12px 0 0;
+  padding:0;
+  display:grid;
+  gap:10px;
+}
+.legend-list li{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  font-size:0.95rem;
+  color:var(--muted);
+}
+.legend-swatch{
+  width:16px;
+  height:16px;
+  border-radius:4px;
+  flex-shrink:0;
+}
+.legend-swatch.high{background:var(--high);}
+.legend-swatch.medium{background:var(--medium);}
+.legend-swatch.low{background:var(--low);}
+.legend-swatch.info{background:var(--info);}
+.filter-chips{
+  margin-top:18px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+}
+.chip{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:6px 14px;
+  border-radius:999px;
+  text-decoration:none;
+  font-size:0.85rem;
+  font-weight:600;
+  border:1px solid var(--chip-border);
+  background:var(--chip-bg);
+  color:var(--chip-text);
+  transition:background 0.2s ease, transform 0.2s ease;
+}
+.chip::before{
+  content:"";
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:currentColor;
+}
+.chip:hover{
+  background:var(--chip-hover-bg);
+  transform:translateY(-1px);
+}
+.chip.high{
+  border-color:rgba(225,29,72,0.45);
+  background:rgba(225,29,72,0.14);
+  color:var(--high);
+}
+.chip.medium{
+  border-color:rgba(249,115,22,0.4);
+  background:rgba(249,115,22,0.14);
+  color:var(--medium);
+}
+.chip.low{
+  border-color:rgba(5,150,105,0.35);
+  background:rgba(5,150,105,0.12);
+  color:var(--low);
+}
+.chip.timeline{
+  border-color:rgba(14,165,233,0.4);
+  background:rgba(14,165,233,0.12);
+  color:var(--info);
+}
+.finding{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:18px;
+  padding:24px;
+  margin-bottom:18px;
+  position:relative;
+  box-shadow:0 3px 16px rgba(15,23,42,0.06);
+}
+.finding .heading{
+  display:flex;
+  flex-wrap:wrap;
+  gap:16px;
+  align-items:flex-start;
+}
+.finding h4{
+  margin:0;
+  font-size:1.1rem;
+  font-weight:600;
+}
+.finding .controls{
+  margin-left:auto;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.pill{
+  border-radius:999px;
+  border:1px solid var(--border);
+  padding:6px 12px;
+  font-size:0.85rem;
+  color:var(--muted);
+}
+.finding p{
+  margin:14px 0 12px;
+  color:var(--muted);
+}
+.finding pre{
+  margin:0;
+  background:var(--pre-bg);
+  color:var(--pre-text);
+  padding:16px;
+  border-radius:12px;
+  font-size:0.9rem;
+  overflow-x:auto;
+}
+.finding footer{
+  margin-top:14px;
+  font-size:0.85rem;
+  color:var(--muted);
+  display:flex;
+  flex-wrap:wrap;
+  gap:16px;
+}
+.timeline{
+  background:var(--surface-soft);
+  border-radius:16px;
+  padding:20px 26px;
+  border:1px dashed var(--border);
+}
+.timeline-item{
+  display:flex;
+  gap:14px;
+  align-items:flex-start;
+  padding:10px 0;
+}
+.timeline-item time{
+  font-weight:600;
+  font-size:0.95rem;
+  min-width:120px;
+  color:var(--muted);
+}
+.timeline-item p{
+  margin:0;
+  font-size:0.95rem;
+}
+.footnote{
+  margin-top:48px;
+  font-size:0.85rem;
+  color:var(--muted);
+  text-align:center;
+}
+@media (max-width:720px){
+  .page{padding:0 20px 48px}
+  .masthead{padding:28px;grid-template-columns:1fr}
+  .brand{flex:1 1 100%}
+  .masthead-meta{width:100%;margin-left:0}
+  .masthead-badges{justify-content:flex-start}
+  .finding .controls{width:100%;justify-content:flex-start}
+  .summary-subgrid{grid-template-columns:1fr}
+}
+@media print{
+  body{background:#fff}
+  .page{margin:24px auto;padding:0}
+  .masthead{box-shadow:none}
+  .masthead-badges{justify-content:flex-start}
+  .filter-chips{display:none}
+  .finding, .card{page-break-inside:avoid;box-shadow:none}
+}
 "@
+
   $html=[System.Text.StringBuilder]::new()
   [void]$html.AppendLine('<!doctype html>')
-  [void]$html.AppendLine("<html><head><meta charset='utf-8'><title>$(HtmlEscape $Title)</title><style>$css</style></head><body>")
-  [void]$html.AppendLine("<h1>$(HtmlEscape $Title)</h1>")
-  foreach($code in $groups.Keys){
-    $header= if($UseFriendlyNames){Get-FriendlyHeader -code $code -map $map -includeCode:$IncludeCode}else{$code}
-    $first=$groups[$code][0];$importance=Rank-Importance $first
-    [void]$html.AppendLine("<div class='policy'>")
-    [void]$html.AppendLine("  <div class='header'><div class='title'>$(HtmlEscape $header)</div><div class='badge $importance'>$importance</div></div>")
-    foreach($it in $groups[$code]){
-      $rem=Get-Remediation $it
-      $descEsc=HtmlEscape $it.Desc;$eviEsc=HtmlEscape $it.Evidence;$guiEsc=HtmlEscape $rem.GuiPath;$cmdEsc=HtmlEscape $rem.Command
-      [void]$html.AppendLine("  <div class='desc'>$descEsc</div>")
-      if($it.Evidence){[void]$html.AppendLine("  <div class='meta'><b>Current:</b> $eviEsc</div>")}
-      [void]$html.AppendLine("  <div class='meta'><b>GUI:</b> $guiEsc</div>")
-      [void]$html.AppendLine("  <div class='cmd'>$cmdEsc</div>")
+  [void]$html.AppendLine("<html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><title>$(HtmlEscape $Title)</title><style>$css</style></head><body>")
+  [void]$html.AppendLine('<div class="page">')
+  [void]$html.AppendLine('  <header class="masthead">')
+  [void]$html.AppendLine('    <div class="brand">')
+  [void]$html.AppendLine('      <div class="brand-mark">OW</div>')
+  [void]$html.AppendLine('      <div>')
+  [void]$html.AppendLine("        <h1>$(HtmlEscape $Title)</h1>")
+  [void]$html.AppendLine("        <p class='subtitle'>System: $(HtmlEscape $machineName)</p>")
+  [void]$html.AppendLine("        <p class='tagline'>Profile: $(HtmlEscape $profileName)</p>")
+  [void]$html.AppendLine('      </div>')
+  [void]$html.AppendLine('    </div>')
+  [void]$html.AppendLine('    <div class="masthead-meta">')
+  [void]$html.AppendLine("      <span>Audit Date: $(HtmlEscape $auditDateDisplay)</span>")
+  [void]$html.AppendLine("      <span>Auditor: OmniWin Auditor (PowerShell)</span>")
+  [void]$html.AppendLine("      <span>Report ID: $(HtmlEscape $reportId)</span>")
+  [void]$html.AppendLine('    </div>')
+  [void]$html.AppendLine('    <div class="masthead-badges">')
+  [void]$html.AppendLine('      <span class="report-badge">Confidential</span>')
+  [void]$html.AppendLine('      <span class="report-badge draft">Automated Scan</span>')
+  [void]$html.AppendLine('    </div>')
+  [void]$html.AppendLine('  </header>')
+
+  [void]$html.AppendLine('  <section>')
+  [void]$html.AppendLine('    <h2 class="section-title">Executive Summary</h2>')
+  [void]$html.AppendLine('    <div class="summary-grid">')
+  [void]$html.AppendLine('      <article class="card risk-score">')
+  [void]$html.AppendLine('        <h3>Overall Risk Score</h3>')
+  [void]$html.AppendLine("        <div class='risk-value'>$riskScore</div>")
+  [void]$html.AppendLine("        <span class='risk-label'>$(HtmlEscape $riskLabel)</span>")
+  [void]$html.AppendLine("        <div class='progress-bar'><span style='width:$riskProgress%'></span></div>")
+  [void]$html.AppendLine('      </article>')
+  [void]$html.AppendLine('      <article class="card">')
+  [void]$html.AppendLine('        <h3>Findings by Severity</h3>')
+  [void]$html.AppendLine('        <div class="metrics">')
+  [void]$html.AppendLine("          <div class='metrics-row'><span class='badge high'>High · $($counts.High)</span><div class='metrics-bar'><span style='width:$([math]::Min(100,[math]::Max(5,[math]::Round(($counts.High*100)/[math]::Max($totalFindings,1)))) )%;background:rgba(225,29,72,0.65)'></span></div></div>")
+  [void]$html.AppendLine("          <div class='metrics-row'><span class='badge medium'>Medium · $($counts.Medium)</span><div class='metrics-bar'><span style='width:$([math]::Min(100,[math]::Max(5,[math]::Round(($counts.Medium*100)/[math]::Max($totalFindings,1)))) )%;background:rgba(249,115,22,0.55)'></span></div></div>")
+  [void]$html.AppendLine("          <div class='metrics-row'><span class='badge low'>Low · $($counts.Low)</span><div class='metrics-bar'><span style='width:$([math]::Min(100,[math]::Max(5,[math]::Round(($counts.Low*100)/[math]::Max($totalFindings,1)))) )%;background:rgba(5,150,105,0.45)'></span></div></div>")
+  [void]$html.AppendLine('        </div>')
+  [void]$html.AppendLine('      </article>')
+  $focusText=if($counts.High -gt 0){"Prioritize $($counts.High) high severity control$(if($counts.High -gt 1){'s'}) across $($bySeverity.High.Count) category scope(s)."}elseif($counts.Medium -gt 0){"Address $($counts.Medium) medium findings during the next maintenance window."}elseif($totalFindings -gt 0){"Review remaining low-risk configuration drift and document risk acceptance."}else{"No deviations detected in this pass."}
+  [void]$html.AppendLine('      <article class="card">')
+  [void]$html.AppendLine('        <h3>Coverage Status</h3>')
+  [void]$html.AppendLine("        <p>Findings recorded: $totalItems record$(if($totalItems -eq 1){''}else{'s'}) across $totalFindings control grouping$(if($totalFindings -eq 1){''}else{'s'}).</p>")
+  [void]$html.AppendLine("        <p>$(HtmlEscape $focusText)</p>")
+  [void]$html.AppendLine('      </article>')
+  [void]$html.AppendLine('    </div>')
+  [void]$html.AppendLine('  </section>')
+
+  [void]$html.AppendLine('  <section class="summary-aux">')
+  [void]$html.AppendLine('    <div class="summary-subgrid">')
+  [void]$html.AppendLine("      <article class='card metrics-card'><h3>Key Metrics <span class='badge info'>Snapshot</span></h3>")
+  [void]$html.AppendLine('        <table class="metrics-table"><tbody>')
+  [void]$html.AppendLine("          <tr><th scope='row'>Input Source</th><td>$(HtmlEscape $inputName)</td></tr>")
+  [void]$html.AppendLine("          <tr><th scope='row'>Profile</th><td>$(HtmlEscape $profileName)</td></tr>")
+  [void]$html.AppendLine("          <tr><th scope='row'>Friendly Names</th><td>$friendlyMode</td></tr>")
+  [void]$html.AppendLine("          <tr><th scope='row'>Control IDs</th><td>$codeMode</td></tr>")
+  [void]$html.AppendLine("          <tr><th scope='row'>Unique Categories</th><td>$($groups.Keys.Count)</td></tr>")
+  [void]$html.AppendLine("          <tr><th scope='row'>Total Findings</th><td>$totalFindings grouping$(if($totalFindings -eq 1){''}else{'s'}) / $totalItems record$(if($totalItems -eq 1){''}else{'s'})</td></tr>")
+  [void]$html.AppendLine('        </tbody></table>')
+  [void]$html.AppendLine('      </article>')
+  [void]$html.AppendLine('      <article class="card legend-card">')
+  [void]$html.AppendLine('        <h3>Severity Legend &amp; Filters</h3>')
+  [void]$html.AppendLine('        <ul class="legend-list">')
+  [void]$html.AppendLine('          <li><span class="legend-swatch high"></span>High · Immediate mitigation recommended</li>')
+  [void]$html.AppendLine('          <li><span class="legend-swatch medium"></span>Medium · Address during next maintenance window</li>')
+  [void]$html.AppendLine('          <li><span class="legend-swatch low"></span>Low · Monitor or accept with documented rationale</li>')
+  [void]$html.AppendLine('          <li><span class="legend-swatch info"></span>Informational · Track for documentation or exception</li>')
+  [void]$html.AppendLine('        </ul>')
+  [void]$html.AppendLine("        <div class='filter-chips'>$filterMarkup</div>")
+  [void]$html.AppendLine('      </article>')
+  [void]$html.AppendLine('    </div>')
+  [void]$html.AppendLine('  </section>')
+
+  $severitySections=@(
+    @{Key='High';Id='high-findings';Title='Critical &amp; High Priority Findings';BadgeClass='high'}
+    @{Key='Medium';Id='medium-findings';Title='Medium Priority Findings';BadgeClass='medium'}
+    @{Key='Low';Id='low-findings';Title='Low Priority &amp; Advisory Items';BadgeClass='low'}
+  )
+  foreach($section in $severitySections){
+    $sev=$section.Key
+    $entries=$bySeverity[$sev]
+    if(-not $entries -or $entries.Count -eq 0){continue}
+    [void]$html.AppendLine("  <section id='$($section.Id)'>")
+    [void]$html.AppendLine("    <h2 class='section-title'>$($section.Title)</h2>")
+    foreach($finding in $entries){
+      $cat=& $resolveCategory $finding.Code $map
+      [void]$html.AppendLine('    <article class="finding">')
+      [void]$html.AppendLine('      <div class="heading">')
+      [void]$html.AppendLine("        <h4>$(HtmlEscape $finding.Header)</h4>")
+      [void]$html.AppendLine("        <span class='badge $($section.BadgeClass)'>$sev</span>")
+      [void]$html.AppendLine('        <div class="controls">')
+      [void]$html.AppendLine("          <span class='pill'>Category: $(HtmlEscape $cat)</span>")
+      if(-not $IncludeCode){[void]$html.AppendLine("          <span class='pill'>Control: $(HtmlEscape $finding.Code)</span>")}
+      [void]$html.AppendLine('        </div>')
+      [void]$html.AppendLine('      </div>')
+      foreach($item in $finding.Items){
+        $rem=Get-Remediation $item
+        $descEsc=HtmlEscape $item.Desc
+        $eviEsc=HtmlEscape $item.Evidence
+        $guiEsc=HtmlEscape $rem.GuiPath
+        $cmdEsc=HtmlEscape $rem.Command
+        [void]$html.AppendLine("      <p>$descEsc</p>")
+        [void]$html.AppendLine("      <pre>$cmdEsc</pre>")
+        [void]$html.AppendLine('      <footer>')
+        if($item.Evidence){[void]$html.AppendLine("        <span>Evidence: $eviEsc</span>")}
+        [void]$html.AppendLine("        <span>GUI: $guiEsc</span>")
+        [void]$html.AppendLine("        <span>Code ID: $(HtmlEscape $finding.Code)</span>")
+        [void]$html.AppendLine('      </footer>')
+      }
+      [void]$html.AppendLine('    </article>')
     }
-    [void]$html.AppendLine('</div>')
+    [void]$html.AppendLine('  </section>')
   }
+
+  [void]$html.AppendLine("  <section id='timeline'>")
+  [void]$html.AppendLine('    <h2 class="section-title">Audit Timeline &amp; Notes</h2>')
+  [void]$html.AppendLine('    <div class="timeline">')
+  foreach($entry in $timeline){
+    $time=& $fmtTime $entry.Time
+    $desc=HtmlEscape $entry.Desc
+    [void]$html.AppendLine('      <div class="timeline-item">')
+    [void]$html.AppendLine("        <time>$time</time>")
+    [void]$html.AppendLine("        <p>$desc</p>")
+    [void]$html.AppendLine('      </div>')
+  }
+  [void]$html.AppendLine('    </div>')
+  [void]$html.AppendLine('  </section>')
+
+  [void]$html.AppendLine("  <p class='footnote'>Report generated $(HtmlEscape ($generatedAt.ToString('yyyy-MM-dd HH:mm'))) local time. Review remediation commands carefully before execution.</p>")
+  [void]$html.AppendLine('</div>')
   [void]$html.AppendLine('</body></html>')
+
   [IO.File]::WriteAllText($OutputPath,$html.ToString(),[Text.Encoding]::UTF8)
 }
 

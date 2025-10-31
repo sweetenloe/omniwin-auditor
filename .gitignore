@@ -7,3 +7,4 @@ Modules/Windows_PC/*.ps1
 Modules/Windows_Server/*.ps1
 !OmniWin-Resolve.ps1
 !Modules/Windows_PC/Windows_11_H-P-E.ps1
+docs/demo_audit.html
