@@ -1,0 +1,9 @@
+OmniWinAudit*/
+logs/*.log
+logs/*.html
+logs/resolution-history.json
+Modules/O365/*.ps1
+Modules/Windows_PC/*.ps1
+Modules/Windows_Server/*.ps1
+!OmniWin-Resolve.ps1
+!Modules/Windows_PC/Windows_11_H-P-E.ps1

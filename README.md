@@ -1,8 +1,11 @@
 # OmniWin Auditor: Windows Security Audit Tool  
+[![PowerShell 7+](https://img.shields.io/badge/PowerShell-7%2B-5391FE?logo=powershell&logoColor=white)](#quick-start) [![License: MIT](https://img.shields.io/badge/license-MIT-brightgreen.svg)](LICENSE)
 
 OmniWin Auditor is a free and open-source PowerShell tool that makes it easy to check how secure your Windows PC really is according to partial CIS and DOD standards. No need to click through dozens of menus or hidden settings—just run the script and get a clear report.  
 
-Works on Windows 10, Windows 11, and Windows Server. 
+New features: quicker policy diffs and streamlined exports. 
+
+Currently only tested on Windows 11. 
 
 ### Helpful for everyday users, IT staff, and anyone who wants to know if their system is locked down.  
 
@@ -20,23 +23,36 @@ Works on Windows 10, Windows 11, and Windows Server.
 
 ## Supported versions  
 
-- Windows 10 (Home, Pro, Enterprise, Education)  
-- Windows 11 (Home, Pro, Enterprise, Education)  
-- Windows Server 2022 / 2025 (new edition not tested)  
-- Microsoft 365 / Office 365 setups (new edition not tested)
-- Azure AD and Hybrid AD systems (partially tested)  
+- Windows 11 (Home, Pro, Enterprise, Education) — tested  
+- Windows 10 (Home, Pro, Enterprise, Education) — pending validation  
+- Windows Server 2022 / 2025 — pending validation  
+- Microsoft 365 / Office 365 setups — pending validation
+- Azure AD and Hybrid AD systems — partially tested  
 
 ---
 
 ## Quick Start  
 
 1. **Download** this repo (no install needed)  
-2. **Open PowerShell as Administrator**  
+2. **Open PowerShell as Administrator** (run `Set-ExecutionPolicy -Scope Process RemoteSigned` if needed)  
 3. **Navigate** to the folder  
 4. Run:  
    ```powershell
    .\omniwin-auditor.ps1
     ```
+5. Optional:  
+   ```powershell
+   .\OmniWin-Resolve.ps1
+   ```
+   apply supported fixes.
+
+### Resolve helper
+
+- Autoloads the latest audit report and highlights high-severity items first  
+- Lets you batch-select remediation commands (password policy, services, registry, etc.), then runs them with undo tracking  
+- Stores undo history in `logs/resolution-history.json` and offers per-item rollback  
+- Can re-run or back out changes later, keeping track of what was applied  
+- Works best in the same session you ran the audit, so logs stay in sync
 
 Pick the recommended scan and you're on your way!
 
@@ -66,6 +82,7 @@ Pick the recommended scan and you're on your way!
 
 
 ### Example of an audit export:
+Preview: [Sample audit report](docs/sample_audit.pdf)
 Here's what the main audit report looks like:
 
 ```html
@@ -130,3 +147,7 @@ Here's what the main audit report looks like:
     Certain checks only work on newer Windows versions
 
 If secedit logs fail, the tool will automatically fall back and grab the data another way. No manual fixing needed.
+
+## Support
+
+Need help or spot a bug? [Open an issue](https://github.com/sweetenloe/omniwin-auditor/issues).

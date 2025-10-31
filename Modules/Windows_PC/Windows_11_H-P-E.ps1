@@ -12,13 +12,7 @@ if($reverveCommand -ne $null){
 }
 
 
-Function Clean-Value($variable) {
 
-$variable = $null 
-
-return $variable
-
-}
 
 
 Function Reverse-SID ($nullSID) {
@@ -64,7 +58,37 @@ $outpuReverseSid += No One
 }
 }
 
+function Get-SecEditValue {
+ param(
+  [Parameter(Mandatory = $true)][string]$Key,
+  [string]$NotConfiguredMessage = $null
+ )
 
+ $pattern = '^{0}\s*=' -f [regex]::Escape($Key)
+ $match = Get-Content -Path $seceditfile | Select-String -Pattern $pattern | Select-Object -First 1
+ if ($match) { return $match.Line }
+ if ($NotConfiguredMessage) { return $NotConfiguredMessage }
+ return "$Key = NotConfigured"
+}
+
+function Write-AuditLine {
+ param(
+  [Parameter(Mandatory = $true)][string]$Id,
+  [Parameter(Mandatory = $true)][string]$Description,
+  [Parameter()][object]$Value
+ )
+
+ $line = "{0};{1};" -f $Id, $Description
+ if ($null -ne $Value) {
+  if ($Value -is [System.Array]) {
+   $line += ($Value -join '')
+  }
+  else {
+   $line += $Value
+  }
+ }
+ Add-Content -Path $fname -Value $line
+}
 
 function StringArrayToList($StringArray) {
  if ($StringArray) {
@@ -78,6 +102,38 @@ function StringArrayToList($StringArray) {
  else {
   return ""
  }
+}
+
+function Get-SecEditValue {
+ param(
+  [Parameter(Mandatory = $true)][string]$Key,
+  [string]$NotConfiguredMessage = $null
+ )
+
+ $pattern = '^{0}\s*=' -f [regex]::Escape($Key)
+ $match = Get-Content -Path $seceditfile | Select-String -Pattern $pattern | Select-Object -First 1
+ if ($match) { return $match.Line }
+ if ($NotConfiguredMessage) { return $NotConfiguredMessage }
+ return "$Key = NotConfigured"
+}
+
+function Write-AuditLine {
+ param(
+  [Parameter(Mandatory = $true)][string]$Id,
+  [Parameter(Mandatory = $true)][string]$Description,
+  [Parameter()][object]$Value
+ )
+
+ $line = "{0};{1};" -f $Id, $Description
+ if ($null -ne $Value) {
+  if ($Value -is [System.Array]) {
+   $line += ($Value -join '')
+  }
+  else {
+   $line += $Value
+  }
+ }
+ Add-Content -Path $fname -Value $line
 }
 
 $OSInfo = Get-WmiObject Win32_OperatingSystem | Select-Object Caption, Version, ServicePackMajorVersion, OSArchitecture, CSName, WindowsDirectory, NumberOfUsers, BootDevice
@@ -255,7 +311,7 @@ function addShare {
  $d | Add-Member -Name "AccessRight"-MemberType NoteProperty -Value $NDS
  return $d
 }
-$tableauShare = @()
+$shareEntries = @()
   
 $listShare = Get-SmbShare 
  
@@ -263,39 +319,39 @@ $listShare = Get-SmbShare
 foreach ( $share in $listShare) {
  
  
- $droits = Get-SmbShareAccess $share.name
+ $sharePermissions = Get-SmbShareAccess $share.name
  
  
- foreach ( $droit in $droits) {
+ foreach ( $sharePermission in $sharePermissions) {
  
  
-  $tableauShare += addShare -NS $share.name -CS $share.path -US $droit.AccountName -TS $droit.AccessControlType -NDS $droit.AccessRight
+  $shareEntries += addShare -NS $share.name -CS $share.path -US $sharePermission.AccountName -TS $sharePermission.AccessControlType -NDS $sharePermission.AccessRight
  
  
  }
 }
 
-$tableauShare | ConvertTo-CSV -NoTypeInformation -Delimiter ";" | Set-Content $fnameShare
+$shareEntries | ConvertTo-CSV -NoTypeInformation -Delimiter ";" | Set-Content $fnameShare
 
 Write-Host "#########>Take Appdata Information<#########" -ForegroundColor DarkGreen
-$cheminProfils = (Get-ItemProperty -Path HKLM:\SOFTWARE\Microsoft\Windows' 'NT\CurrentVersion\ProfileList\).ProfilesDirectory
+$profileDirectory = (Get-ItemProperty -Path HKLM:\SOFTWARE\Microsoft\Windows' 'NT\CurrentVersion\ProfileList\).ProfilesDirectory
   
   
-$profilpresent = Get-ChildItem $cheminProfils 
+$profileItems = Get-ChildItem $profileDirectory 
   
 $resultAPP = @()
 $fnameAPP = "./APPDATA" + "$OSName" + ".csv"
   
   
-foreach ( $profil in $profilpresent) {
+foreach ( $profileItem in $profileItems) {
   
-  $verifAppdata = Test-Path $cheminProfils\$profil\Appdata
+  $appDataExists = Test-Path $profileDirectory\$profileItem\Appdata
   
-  if ($verifAppdata -eq $true) {
+  if ($appDataExists -eq $true) {
   
-    $resultat = Get-ChildItem $cheminProfils\$profil\Appdata -Recurse -Include *.bat, *.exe, *.ps1, *.ps1xml, *.PS2, *.PS2XML, *.psc1, *.PSC2, *.msi, *.py, *.pif, *.MSP , *.COM, *.SCR, *.hta, *.CPL, *.MSC, *.JAR, *.VB, *.VBS, *.VBE, *.JS, *.JSE, *.WS, *.wsf, *.wsc, *.wsh, *.msh, *.MSH1, *.MSH2, *.MSHXML, *.MSH1XML, *.MSH2XML, *.scf, *.REG, *.INF   | Select-Object Name, Directory, Fullname 
+    $appDataResults = Get-ChildItem $profileDirectory\$profileItem\Appdata -Recurse -Include *.bat, *.exe, *.ps1, *.ps1xml, *.PS2, *.PS2XML, *.psc1, *.PSC2, *.msi, *.py, *.pif, *.MSP , *.COM, *.SCR, *.hta, *.CPL, *.MSC, *.JAR, *.VB, *.VBS, *.VBE, *.JS, *.JSE, *.WS, *.wsf, *.wsc, *.wsh, *.msh, *.MSH1, *.MSH2, *.MSHXML, *.MSH1XML, *.MSH2XML, *.scf, *.REG, *.INF   | Select-Object Name, Directory, Fullname 
   
-  foreach ($riskyfile in $resultat) {
+  foreach ($riskyfile in $appDataResults) {
 
 $signature = Get-FileHash -Algorithm SHA256 $riskyfile.Fullname -ErrorAction SilentlyContinue
 
@@ -306,7 +362,7 @@ $signature = Get-FileHash -Algorithm SHA256 $riskyfile.Fullname -ErrorAction Sil
                             Directory = $riskyfile.Directory
                             Path = $riskyfile.Fullname
 							              Signature = $signature.Hash
-                            Profil= $profil.name
+                            Profil= $profileItem.name
 							
                         }
 
@@ -317,12 +373,12 @@ $resultAPP +=$resultApptemp
   }
 }
  
-    $resulatCount = $resultAPP |Measure-Object 
-    $resulatCount = $resulatCount.Count
+    $resultCount = $resultAPP |Measure-Object 
+    $resultCount = $resultCount.Count
   
   
   
-    if ( $resulatCount -gt 0) {
+    if ( $resultCount -gt 0) {
       $resultAPP | Export-Csv -NoTypeInformation $fnameAPP
   
       
@@ -357,21 +413,21 @@ $fnameservice = "./Service- " + "$OSName" + ".csv"
 Get-WmiObject win32_service | Select-Object Name, DisplayName, State, StartName, StartMode, PathName |Export-Csv -Delimiter ";" $fnameservice -NoTypeInformation
 
 Write-Host "#########>Take Scheduled task Information<#########" -ForegroundColor DarkGreen
-$fnamettache = "./Scheduled-task- " + "$OSName" + ".csv"
-$tabletache = Get-ScheduledTask |Select-Object -Property *
+$scheduledTaskFile = "./Scheduled-task- " + "$OSName" + ".csv"
+$taskList = Get-ScheduledTask |Select-Object -Property *
 $resultTask= @()
-foreach ($tache in $tabletache) {
-$taskactions = Get-ScheduledTask $tache.Taskname |Select-Object -ExpandProperty Actions
+foreach ($task in $taskList) {
+$taskactions = Get-ScheduledTask $task.Taskname |Select-Object -ExpandProperty Actions
 
  foreach ( $taskaction in $taskactions ) {
 
 
 $resultTasktemp = [PSCustomObject]@{
-                            Task_name = $tache.Taskname
-                            Task_URI = $tache.URI
-                            Task_state = $tache.State
-                            Task_Author = $tache.Author
-							Task_Description = $tache.Description
+                            Task_name = $task.Taskname
+                            Task_URI = $task.URI
+                            Task_state = $task.State
+                            Task_Author = $task.Author
+							Task_Description = $task.Description
                             Task_action = $taskaction.Execute 
                             Task_action_Argument = $taskaction.Arguments
                             Task_Action_WorkingDirectory = $taskaction.WorkingDirectory
@@ -386,7 +442,7 @@ $resultTask += $resultTasktemp
 
 
 
-$resultTask | Export-Csv -NoTypeInformation $fnamettache
+$resultTask | Export-Csv -NoTypeInformation $scheduledTaskFile
 
 Write-Host "#########>Take Accounts Policy Information<#########" -ForegroundColor DarkGreen
 $fnameNetAccount = "./AccountsPolicy- " + "$OSName" + ".txt"
@@ -410,24 +466,24 @@ foreach ( $user in $listlocaluser) {
 
  if ( $user.sid -like "*-500") {
 
-  $nomcompteadmin = $user.Name
+  $adminAccountName = $user.Name
 
-  $statutcompteadmin = $user.Disabled
-  if ($statutcompteadmin -eq $true) {
-   $adminstate = "disable"
+  $adminAccountDisabled = $user.Disabled
+  if ($adminAccountDisabled -eq $true) {
+   $adminStatus = "disabled"
   }
   else {
-   $adminstate = "enable"
+   $adminStatus = "enabled"
   }
  }
  elseif ( $user.sid -like "*-501") {
-  $nomcompteguest = $user.Name
-  $statutcompteguest = $user.Disabled
-  if ($statutcompteguest -eq $true) {
-   $gueststate = "disable"
+  $guestAccountName = $user.Name
+  $guestAccountDisabled = $user.Disabled
+  if ($guestAccountDisabled -eq $true) {
+   $guestStatus = "disabled"
   }
   else {
-   $gueststate = "enable"
+   $guestStatus = "enabled"
   }
 
  }
@@ -459,986 +515,800 @@ Write-Host "#########>Begin password policy audit<#########" -ForegroundColor Da
 
 
 $id = "PP-" + "1.1.1"
-$nulevoy = $id + ";" + "(L1)Ensure 'Enforce password history' is set to '24 or more password(s), value must be 24 or More" + ";"
-$pustoy = Get-Content $seceditfile |Select-String "PasswordHistorySize"
+Write-AuditLine -Id $id -Description "(L1)Ensure 'Enforce password history' is set to '24 or more password(s), value must be 24 or More" -Value (Get-SecEditValue "PasswordHistorySize")
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "PP-" + "1.1.2"
-$nulevoy = "$id" + ";" + "(L1)Maximum password age is set to 365 or fewer days, value must be 365 or less but not 0" + ";"
-$pustoy = Get-Content $seceditfile |Select-String "MaximumPasswordAge" |select-object -First 1
+Write-AuditLine -Id $id -Description "(L1)Maximum password age is set to 365 or fewer days, value must be 365 or less but not 0" -Value (Get-SecEditValue "MaximumPasswordAge")
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "PP-" + "1.1.3"
-$nulevoy = "$id" + ";" + "(L1)Minimum password age is set to 1 or more day(s), value must be 1 or more but not 0" + ";"
-$pustoy = Get-Content $seceditfile |Select-String "MinimumPasswordAge"
+Write-AuditLine -Id $id -Description "(L1)Minimum password age is set to 1 or more day(s), value must be 1 or more but not 0" -Value (Get-SecEditValue "MinimumPasswordAge")
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "PP-" + "1.1.4"
+Write-AuditLine -Id $id -Description "(L1)Minimum password length is set to 14 or more character(s), value must be 14 or more" -Value (Get-SecEditValue "MinimumPasswordLength")
 
-$nulevoy = "$id" + ";" + "(L1)Minimum password length is set to 14 or more character(s), value must be 14 or more" + ";"
-$pustoy = Get-Content $seceditfile |Select-String "MinimumPasswordLength"
-
-$nulevoy += $pustoy
-$nulevoy>> $fname
-
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "PP-" + "1.1.5"
-$nulevoy = "$id" + ";" + "(L1)Password must meet complexity requirements is set to Enabled, value must be 1" + ";"
-$pustoy = Get-Content $seceditfile |Select-String "PasswordComplexity"
+Write-AuditLine -Id $id -Description "(L1)Password must meet complexity requirements is set to Enabled, value must be 1" -Value (Get-SecEditValue "PasswordComplexity")
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "PP-" + "1.1.6"
-$nulevoy = "$id" + ";" + "(L1)Relax minimum password length limits' is set to Enabled, value must be 1 (Warning this may cause compatibility issues)" + ";"
-$exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\SAM"
-if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\SAM" | Select-Object RelaxMinimumPasswordLengthLimits
- $pustoy = $pustoy.RelaxMinimumPasswordLengthLimits
-
-if ( $pustoy -eq $null) {
-$pustoy = "no configuration"
+$policyValue = "no configuration"
+if (Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\SAM") {
+ $policyValue = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\SAM" -ErrorAction SilentlyContinue).RelaxMinimumPasswordLengthLimits
+ if ($policyValue -eq $null) {
+  $policyValue = "no configuration"
+ }
 }
+Write-AuditLine -Id $id -Description "(L1)Relax minimum password length limits' is set to Enabled, value must be 1 (Warning this may cause compatibility issues)" -Value $policyValue
 
-}
-else {
- $pustoy = "no configuration"
-}
-
-$nulevoy += $pustoy
-$nulevoy>> $fname
-
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $indextest += 1
 
 $id = "PP-" + "1.1.7"
-$nulevoy = "$id" + ";" + "(L1)Store passwords using reversible encryption is set to Disabled, value must be 0" + ";"
-$pustoy = Get-Content $seceditfile |Select-String "ClearTextPassword"
+Write-AuditLine -Id $id -Description "(L1)Store passwords using reversible encryption is set to Disabled, value must be 0" -Value (Get-SecEditValue "ClearTextPassword")
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin account lockout policy audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "ALP-" + "1.2.1"
 
-$nulevoy = "$id" + ";" + "(L1)Account lockout duration is set to 15 or more minute(s)" + ";"
-$pustoy = Get-Content $fnameNetAccount |Select-String -pattern '(DurA''AAe du verrouillage)|(Lockout duration)'
+Write-AuditLine -Id $id -Description "(L1)Account lockout duration is set to 15 or more minute(s)" -Value (Get-SecEditValue "LockoutDuration")
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-
-
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "ALP-" + "1.2.2"
 
-$nulevoy = "$id" + ";" + "(L1)Ensure Account lockout threshold is set to 5 or fewer invalid logon attempt(s), but not 0" + ";"
-$pustoy = Get-Content $fnameNetAccount |Select-String -pattern '(Seuil de verrouillage)|(Lockout threshold)'
+Write-AuditLine -Id $id -Description "(L1)Ensure Account lockout threshold is set to 5 or fewer invalid logon attempt(s), but not 0" -Value (Get-SecEditValue "LockoutBadCount")
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "ALP-" + "1.2.3"
 
-$nulevoy = "$id" + ";" + "(L1)Allow Administrator account lockout is set to Enabled, value must be 1" + ";"
-$pustoy = Get-Content $seceditfile |Select-String "AllowAdministratorLockout"
+Write-AuditLine -Id $id -Description "(L1)Allow Administrator account lockout is set to Enabled, value must be 1" -Value (Get-SecEditValue "AllowAdministratorLockout")
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "ALP-" + "1.2.4"
-$nulevoy = "$id" + ";" + "(L1)Reset account lockout counter after is set to 15 or more minute(s)" + ";"
-$pustoy = Get-Content $fnameNetAccount |Select-String -pattern "(FenA'AAatre d'observation du verrouillage)|(Lockout observation window)"
+Write-AuditLine -Id $id -Description "(L1)Reset account lockout counter after is set to 15 or more minute(s)" -Value (Get-SecEditValue "ResetLockoutCount")
 
-
-$nulevoy += $pustoy
-$nulevoy>> $fname
-
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin user rights assignment audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "URA-" + "2.2.1"
-$nulevoy = "$id" + ";" + "(L1)Acess Credential Manager as a trusted caller is set to No One , value must be empty" + ";"
-$pustoy = Get-Content $seceditfile |Select-String "SeTrustedCredManAccessPrivilege"
+$outputLine = "$id" + ";" + "(L1)Acess Credential Manager as a trusted caller is set to No One , value must be empty" + ";"
+$policyValue = Get-Content $seceditfile |Select-String "SeTrustedCredManAccessPrivilege"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "URA-" + "2.2.2"
-$nulevoy = "$id" + ";" + "(L1)Access this computer from the network, Only Administrators, Remote Desktop Users " + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeNetworkLogonRight" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeNetworkLogonRight" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Access this computer from the network, Only Administrators, Remote Desktop Users " + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeNetworkLogonRight" 
+$sidLine = $sidLine.line
+$policyValue = "SeNetworkLogonRight" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "URA-" + "2.2.3"
-$nulevoy = "$id" + ";" + "(L1)Act as part of the operating system' , Must be empty " + ";"
+$outputLine = "$id" + ";" + "(L1)Act as part of the operating system' , Must be empty " + ";"
 $test = Get-Content $seceditfile |Select-String "SeTcbPrivilege"
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeTcbPrivilege" + ":"
+$sidLine = $sidLine.line
+$policyValue = "SeTcbPrivilege" + ":"
 
-$pustoy += Reverse-SID $test
+$policyValue += Reverse-SID $test
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "URA-" + "2.2.4"
-$nulevoy = "$id" + ";" + "(L1)Adjust memory quotas for a process , Administrators, LOCAL SERVICE, NETWORK SERVICE " + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeIncreaseQuotaPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeIncreaseQuotaPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Adjust memory quotas for a process , Administrators, LOCAL SERVICE, NETWORK SERVICE " + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeIncreaseQuotaPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeIncreaseQuotaPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "URA-" + "2.2.5"
 
-$nulevoy = "$id" + ";" + "(L1)Allow log on locally, Administrators, Users" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeInteractiveLogonRight" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeInteractiveLogonRight" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Allow log on locally, Administrators, Users" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeInteractiveLogonRight" 
+$sidLine = $sidLine.line
+$policyValue = "SeInteractiveLogonRight" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "URA-" + "2.2.6"
-$nulevoy = "$id" + ";" + "(L1)Allow log on through Remote Desktop Services, Only Administrators, Remote Desktop Users. If Remote Apps or CItrix authentificated users" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeRemoteInteractiveLogonRight" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeRemoteInteractiveLogonRight" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Allow log on through Remote Desktop Services, Only Administrators, Remote Desktop Users. If Remote Apps or CItrix authentificated users" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeRemoteInteractiveLogonRight" 
+$sidLine = $sidLine.line
+$policyValue = "SeRemoteInteractiveLogonRight" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "URA-" + "2.2.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure Back up files and directories, Only Administrators," + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeBackupPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeBackupPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Ensure Back up files and directories, Only Administrators," + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeBackupPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeBackupPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "URA-" + "2.2.8"
-$nulevoy = "$id" + ";" + "(L1)Change the system time, Only Administrators and local service" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeSystemtimePrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeSystemtimePrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Change the system time, Only Administrators and local service" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeSystemtimePrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeSystemtimePrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "URA-" + "2.2.9"
-$nulevoy = "$id" + ";" + "(L1)Change the time zone', Only Administrators ,local service and users" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeTimeZonePrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeTimeZonePrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Change the time zone', Only Administrators ,local service and users" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeTimeZonePrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeTimeZonePrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "URA-" + "2.2.10"
-$nulevoy = "$id" + ";" + "(L1)Create a pagefile, Only Administrators " + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeCreatePagefilePrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeCreatePagefilePrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Create a pagefile, Only Administrators " + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeCreatePagefilePrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeCreatePagefilePrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "URA-" + "2.2.11"
-$nulevoy = "$id" + ";" + "(L1)Create a token object, No one " + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeCreateTokenPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeCreateTokenPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Create a token object, No one " + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeCreateTokenPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeCreateTokenPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "URA-" + "2.2.12"
-$nulevoy = "$id" + ";" + "(L1)Ensure Create global objects is set to Administrators, LOCAL SERVICE, NETWORK SERVICE, SERVICE" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeCreateGlobalPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeCreateGlobalPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Ensure Create global objects is set to Administrators, LOCAL SERVICE, NETWORK SERVICE, SERVICE" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeCreateGlobalPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeCreateGlobalPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "URA" + "2.2.13"
-$nulevoy = "$id" + ";" + "(L1)Ensure Create permanent shared objects, No one,value must empty" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeCreatePermanentPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeCreatePermanentPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Ensure Create permanent shared objects, No one,value must empty" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeCreatePermanentPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeCreatePermanentPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "URA" + "2.2.14"
 $id = "URA" + "$indextest"
-$nulevoy = "$id" + ";" + "(L1)Create symbolic links, Administrator and for Hyper V NT VIRTUAL MACHINE\Virtual Machines. " + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeCreateSymbolicLinkPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeCreateSymbolicLinkPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Create symbolic links, Administrator and for Hyper V NT VIRTUAL MACHINE\Virtual Machines. " + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeCreateSymbolicLinkPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeCreateSymbolicLinkPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "URA" + "2.2.15"
 $id = "URA" + "$indextest"
-$nulevoy = "$id" + ";" + "(L1)Ensure Debug programs is set to Administrators or no one" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeDebugPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeDebugPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Ensure Debug programs is set to Administrators or no one" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeDebugPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeDebugPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "URA" + "2.2.16"
-$nulevoy = "$id" + ";" + "(L1)Deny access to this computer from the network,Guest Local Account and member of Domain admin " + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeDenyNetworkLogonRight" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeDenyNetworkLogonRight" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Deny access to this computer from the network,Guest Local Account and member of Domain admin " + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeDenyNetworkLogonRight" 
+$sidLine = $sidLine.line
+$policyValue = "SeDenyNetworkLogonRight" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.17"
-$nulevoy = "$id" + ";" + "(L1)Deny log on as a batch job, Guest " + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeDenyBatchLogonRight" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeDenyBatchLogonRight" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Deny log on as a batch job, Guest " + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeDenyBatchLogonRight" 
+$sidLine = $sidLine.line
+$policyValue = "SeDenyBatchLogonRight" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.18"
-$nulevoy = "$id" + ";" + "(L1)Deny log on as a service, Guest " + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeDenyServiceLogonRight" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeDenyServiceLogonRight" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Deny log on as a service, Guest " + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeDenyServiceLogonRight" 
+$sidLine = $sidLine.line
+$policyValue = "SeDenyServiceLogonRight" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "URA" + "2.2.19"
-$nulevoy = "$id" + ";" + "(L1)Deny log on locally, Guest and member of Domain admin " + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeDenyInteractiveLogonRight" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeDenyInteractiveLogonRight" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Deny log on locally, Guest and member of Domain admin " + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeDenyInteractiveLogonRight" 
+$sidLine = $sidLine.line
+$policyValue = "SeDenyInteractiveLogonRight" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.20"
-$nulevoy = "$id" + ";" + "(L1)Deny log on through Remote Desktop Services, Guest, Local account and member of Domain admin' " + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeDenyRemoteInteractiveLogonRight" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeDenyRemoteInteractiveLogonRight" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Deny log on through Remote Desktop Services, Guest, Local account and member of Domain admin' " + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeDenyRemoteInteractiveLogonRight" 
+$sidLine = $sidLine.line
+$policyValue = "SeDenyRemoteInteractiveLogonRight" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.21"
-$nulevoy = "$id" + ";" + "(L1)Enable computer and user accounts to be trusted for delegation,No one " + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeEnableDelegationPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeEnableDelegationPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Enable computer and user accounts to be trusted for delegation,No one " + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeEnableDelegationPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeEnableDelegationPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "URA" + "2.2.22"
-$nulevoy = "$id" + ";" + "(L1)Force shutdown from a remote system, Only administrators " + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeRemoteShutdownPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeRemoteShutdownPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Force shutdown from a remote system, Only administrators " + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeRemoteShutdownPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeRemoteShutdownPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.23"
-$nulevoy = "$id" + ";" + "(L1)Generate security audits is set to LOCAL SERVICE, NETWORK SERVICE " + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeAuditPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeAuditPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Generate security audits is set to LOCAL SERVICE, NETWORK SERVICE " + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeAuditPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeAuditPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "URA" + "2.2.24"
-$nulevoy = "$id" + ";" + "(L1)Impersonate a client after authentication , Administrators, LOCAL SERVICE, NETWORK SERVICE, SERVICE " + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeImpersonatePrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeImpersonatePrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Impersonate a client after authentication , Administrators, LOCAL SERVICE, NETWORK SERVICE, SERVICE " + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeImpersonatePrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeImpersonatePrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "URA" + "2.2.25"
-$nulevoy = "$id" + ";" + "(L1)Increase scheduling priority , only Administrator and Window Manager\Window Manager Group" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeIncreaseBasePriorityPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeIncreaseBasePriorityPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Increase scheduling priority , only Administrator and Window Manager\Window Manager Group" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeIncreaseBasePriorityPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeIncreaseBasePriorityPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.26"
-$nulevoy = "$id" + ";" + "(L1)Load and unload device drivers' , only Administrator" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeLoadDriverPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeLoadDriverPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Load and unload device drivers' , only Administrator" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeLoadDriverPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeLoadDriverPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.27"
-$nulevoy = "$id" + ";" + "(L1)Lock pages in memory, No one" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeLockMemoryPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeLockMemoryPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Lock pages in memory, No one" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeLockMemoryPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeLockMemoryPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "URA" + "2.2.28"
-$nulevoy = "$id" + ";" + "(L2)Log on as a batch job',Administrators and very specific account" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeBatchLogonRight" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeBatchLogonRight" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L2)Log on as a batch job',Administrators and very specific account" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeBatchLogonRight" 
+$sidLine = $sidLine.line
+$policyValue = "SeBatchLogonRight" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.29"
-$nulevoy = "$id" + ";" + "(L2)Ensure Log on as a service is set to No One and NT VIRTUAL MACHINE\Virtual Machine( When HyperV is installed)" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeServiceLogonRight" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeServiceLogonRight" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L2)Ensure Log on as a service is set to No One and NT VIRTUAL MACHINE\Virtual Machine( When HyperV is installed)" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeServiceLogonRight" 
+$sidLine = $sidLine.line
+$policyValue = "SeServiceLogonRight" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "URA" + "2.2.30"
-$nulevoy = "$id" + ";" + "(L1)Manage auditing and security log,Administrators" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeSecurityPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeSecurityPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Manage auditing and security log,Administrators" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeSecurityPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeSecurityPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.31"
-$nulevoy = "$id" + ";" + "(L1)Modify an object label, No one" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeRelabelPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeRelabelPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Modify an object label, No one" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeRelabelPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeRelabelPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.32"
-$nulevoy = "$id" + ";" + "(L1)Modify firmware environment values is set to Administrators" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeSystemEnvironmentPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeSystemEnvironmentPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Modify firmware environment values is set to Administrators" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeSystemEnvironmentPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeSystemEnvironmentPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.33"
-$nulevoy = "$id" + ";" + "(L1)Perform volume maintenance tasks is set to Administrators" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeManageVolumePrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeManageVolumePrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Perform volume maintenance tasks is set to Administrators" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeManageVolumePrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeManageVolumePrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "URA" + "2.2.34"
-$nulevoy = "$id" + ";" + "(L1)Profile single process is set to Administrators" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeProfileSingleProcessPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeProfileSingleProcessPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Profile single process is set to Administrators" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeProfileSingleProcessPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeProfileSingleProcessPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.35"
-$nulevoy = "$id" + ";" + "(L1)Profile system performance is set to Administrators, NT SERVICE\WdiServiceHost" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeSystemProfilePrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeSystemProfilePrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Profile system performance is set to Administrators, NT SERVICE\WdiServiceHost" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeSystemProfilePrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeSystemProfilePrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.36"
-$nulevoy = "$id" + ";" + "(L1)Replace a process level token is set to LOCAL SERVICE, NETWORK SERVICE and for IIS server you may have IIS applications pools" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeAssignPrimaryTokenPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeAssignPrimaryTokenPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Replace a process level token is set to LOCAL SERVICE, NETWORK SERVICE and for IIS server you may have IIS applications pools" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeAssignPrimaryTokenPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeAssignPrimaryTokenPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "URA" + "2.2.37"
-$nulevoy = "$id" + ";" + "(L1)Restore files and directories is set to Administrators" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeRestorePrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeRestorePrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Restore files and directories is set to Administrators" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeRestorePrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeRestorePrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.38"
-$nulevoy = "$id" + ";" + "(L1)Shut down the system is set to Administrators, Users" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeShutdownPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeShutdownPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Shut down the system is set to Administrators, Users" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeShutdownPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeShutdownPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "URA" + "2.2.39"
-$nulevoy = "$id" + ";" + "(L1)Take ownership of files or other objects is set to Administrators" + ";"
-$nulevoySID = Get-Content $seceditfile |Select-String "SeTakeOwnershipPrivilege" 
-$nulevoySID = $nulevoySID.line
-$pustoy = "SeTakeOwnershipPrivilege" + ":"
-$pustoy += Reverse-SID $nulevoySID
+$outputLine = "$id" + ";" + "(L1)Take ownership of files or other objects is set to Administrators" + ";"
+$sidLine = Get-Content $seceditfile |Select-String "SeTakeOwnershipPrivilege" 
+$sidLine = $sidLine.line
+$policyValue = "SeTakeOwnershipPrivilege" + ":"
+$policyValue += Reverse-SID $sidLine
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Accounts audit<#########" -ForegroundColor DarkGreen
 
 $id = "AA" + "2.3.1.1"
-$nulevoy = "$id" + ";" + "(L1)Accounts: Block Microsoft accounts is set to Users cannot add or log on with Microsoft accounts Value must be 3 " + ";"
+$outputLine = "$id" + ";" + "(L1)Accounts: Block Microsoft accounts is set to Users cannot add or log on with Microsoft accounts Value must be 3 " + ";"
 $exist = Test-Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System | Select-Object NoConnectedUser
- $pustoy = $pustoy.NoConnectedUser
+ $policyValue = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System | Select-Object NoConnectedUser
+ $policyValue = $policyValue.NoConnectedUser
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "AA" + "2.3.1.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure Accounts: Guest account status is set to 'Disabled" + ";"
-$pustoy = "Default guest Account:" + $nomcompteguest + ",statut : $gueststate"
+$outputLine = "$id" + ";" + "(L1)Ensure Accounts: Guest account status is set to 'Disabled" + ";"
+$policyValue = "Default guest Account:" + $guestAccountName + ",status : $guestStatus"
 
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AA" + "2.3.1.3"
-$nulevoy = "$id" + ";" + "(L1)Accounts: Limit local account use of blank passwords to console logon only is set to Enabled, Value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Accounts: Limit local account use of blank passwords to console logon only is set to Enabled, Value must be 1 " + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Control\Lsa
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa |Select-Object LimitBlankPasswordUse
- $pustoy = $pustoy.LimitBlankPasswordUse
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa |Select-Object LimitBlankPasswordUse
+ $policyValue = $policyValue.LimitBlankPasswordUse
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AA" + "2.3.1.4"
-$nulevoy = "$id" + ";" + "(L1)Accounts: Rename administrator account" + ";"
-$pustoy = "Default local admin Account:" + $nomcompteadmin 
+$outputLine = "$id" + ";" + "(L1)Accounts: Rename administrator account" + ";"
+$policyValue = "Default local admin Account:" + $adminAccountName 
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "AA" + "2.3.1.5"
-$nulevoy = "$id" + ";" + "(L1)Accounts: Rename guest account" + ";"
-$pustoy = "Default guest Account:" + $nomcompteguest
+$outputLine = "$id" + ";" + "(L1)Accounts: Rename guest account" + ";"
+$policyValue = "Default guest Account:" + $guestAccountName
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 Write-Host "#########>Begin audit policy audit<#########" -ForegroundColor DarkGreen
 
 
 
 $id = "APA" + "2.3.2.1"
-$nulevoy = "$id" + ";" + "(L1)Audit: Force audit policy subcategory settings (Windows Vista or later) to override audit policy category settings is set to Enabled, Value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Audit: Force audit policy subcategory settings (Windows Vista or later) to override audit policy category settings is set to Enabled, Value must be 1 " + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Control\Lsa
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa |Select-Object SCENoApplyLegacyAuditPolicy
- $pustoy = $pustoy.SCENoApplyLegacyAuditPolicy
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa |Select-Object SCENoApplyLegacyAuditPolicy
+ $policyValue = $policyValue.SCENoApplyLegacyAuditPolicy
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "APA" + "2.3.2.2"
-$nulevoy = "$id" + ";" + "(L1)Audit: Shut down system immediately if unable to log security audits is set to Disabled, Value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Audit: Shut down system immediately if unable to log security audits is set to Disabled, Value must be 0 " + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Control\Lsa
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa |Select-Object CrashOnAuditFail
- $pustoy = $pustoy.CrashOnAuditFail
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa |Select-Object CrashOnAuditFail
+ $policyValue = $policyValue.CrashOnAuditFail
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin devices policy audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "DEVP" + "2.3.4.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure Devices: Allowed to format and eject removable media is set to Administrators and Interactive Users' " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Devices: Allowed to format and eject removable media is set to Administrators and Interactive Users' " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" |Select-Object AllocateDASD
- $pustoy = $pustoy.AllocateDASD
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" |Select-Object AllocateDASD
+ $policyValue = $policyValue.AllocateDASD
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "DEVP" + "2.3.4.1"
-$nulevoy = "$id" + ";" + "(L2)Devices: Prevent users from installing printer drivers is set to Enabled, Value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Devices: Prevent users from installing printer drivers is set to Enabled, Value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Print\Providers\LanMan Print Services\Servers"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Print\Providers\LanMan Print Services\Servers" |Select-Object AddPrinterDrivers
- $pustoy = $pustoy.AddPrinterDrivers
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Print\Providers\LanMan Print Services\Servers" |Select-Object AddPrinterDrivers
+ $policyValue = $policyValue.AddPrinterDrivers
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 Write-Host "#########>Begin Domain member policy audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "DMP" + "2.3.6.1"
-$nulevoy = "$id" + ";" + "(L1)Domain member: Digitally encrypt or sign secure channel data (always) is set to Enabled, Value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Domain member: Digitally encrypt or sign secure channel data (always) is set to Enabled, Value must be 1 " + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters |Select-Object RequireSignOrSeal
- $pustoy = $pustoy.RequireSignOrSeal
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters |Select-Object RequireSignOrSeal
+ $policyValue = $policyValue.RequireSignOrSeal
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "DMP" + "2.3.6.2"
-$nulevoy = "$id" + ";" + "(L1)Domain member: Digitally encrypt secure channel data (when possible) is set to Enabled, Value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Domain member: Digitally encrypt secure channel data (when possible) is set to Enabled, Value must be 1 " + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters |Select-Object SealSecureChannel
- $pustoy = $pustoy.SealSecureChannel
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters |Select-Object SealSecureChannel
+ $policyValue = $policyValue.SealSecureChannel
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "DMP" + "2.3.6.3"
-$nulevoy = "$id" + ";" + "(L1)Domain member: Domain member: Digitally sign secure channel data (when possible) is set to Enabled, Value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Domain member: Domain member: Digitally sign secure channel data (when possible) is set to Enabled, Value must be 1 " + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters |Select-Object SignSecureChannel
- $pustoy = $pustoy.SealSecureChannel
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters |Select-Object SignSecureChannel
+ $policyValue = $policyValue.SealSecureChannel
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "DMP" + "2.3.6.4"
-$nulevoy = "$id" + ";" + "(L1)Domain member: Disable machine account password changes is set to Disabled, Value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Domain member: Disable machine account password changes is set to Disabled, Value must be 0 " + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters
 if ( $exist -eq $true) {
-				$pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters |Select-Object DisablePasswordChange
- $pustoy = $pustoy.DisablePasswordChange
+				$policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters |Select-Object DisablePasswordChange
+ $policyValue = $policyValue.DisablePasswordChange
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "DMP" + "2.3.6.5"
-$nulevoy = "$id" + ";" + "(L1)Domain member: Maximum machine account password age is set to 30 or fewer days, but not 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Domain member: Maximum machine account password age is set to 30 or fewer days, but not 0 " + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters
 if ( $exist -eq $true) {
-				$pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters |Select-Object MaximumPasswordAge
- $pustoy = $pustoy.MaximumPasswordAge
+				$policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters |Select-Object MaximumPasswordAge
+ $policyValue = $policyValue.MaximumPasswordAge
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "DMP" + "2.3.6.6"
-$nulevoy = "$id" + ";" + "(L1)Domain member: Require strong (Windows 2000 or later) session key' is set to 'Enabled,value must 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Domain member: Require strong (Windows 2000 or later) session key' is set to 'Enabled,value must 1 " + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters |Select-Object RequireStrongKey
- $pustoy = $pustoy.RequireStrongKey
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters |Select-Object RequireStrongKey
+ $policyValue = $policyValue.RequireStrongKey
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin Interactive logon audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "IL" + "2.3.7.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure Interactive logon: Do not require CTRL+ALT+DEL' is set to Disabled,value must 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Interactive logon: Do not require CTRL+ALT+DEL' is set to Disabled,value must 0 " + ";"
 $exist = Test-Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System |Select-Object DisableCAD
- $pustoy = $pustoy.DisableCAD
+ $policyValue = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System |Select-Object DisableCAD
+ $policyValue = $policyValue.DisableCAD
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 
 $id = "IL" + "2.3.7.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure Interactive logon: Do not display last user name is set to Enabled,value must 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Interactive logon: Do not display last user name is set to Enabled,value must 1 " + ";"
 $exist = Test-Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System |Select-Object DontDisplayLastUserName
- $pustoy = $pustoy.DontDisplayLastUserName
+ $policyValue = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System |Select-Object DontDisplayLastUserName
+ $policyValue = $policyValue.DontDisplayLastUserName
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
@@ -1446,667 +1316,593 @@ Clean-Value($pustoy)
 
 
 $id = "IL" + "2.3.7.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure Interactive logon: Machine account lockout threshold' is set to '10 or fewer invalid logon attempts, but not 0',value must 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Interactive logon: Machine account lockout threshold' is set to '10 or fewer invalid logon attempts, but not 0',value must 0 " + ";"
 $exist = Test-Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System |Select-Object MaxDevicePasswordFailedAttempts
- $pustoy = $pustoy.MaxDevicePasswordFailedAttempts
+ $policyValue = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System |Select-Object MaxDevicePasswordFailedAttempts
+ $policyValue = $policyValue.MaxDevicePasswordFailedAttempts
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "IL" + "2.3.7.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure Interactive logon: Machine inactivity limit' is set to 900 or fewer second(s), but not 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Interactive logon: Machine inactivity limit' is set to 900 or fewer second(s), but not 0 " + ";"
 $exist = Test-Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System |Select-Object InactivityTimeoutSecs
- $pustoy = $pustoy.InactivityTimeoutSecs
+ $policyValue = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System |Select-Object InactivityTimeoutSecs
+ $policyValue = $policyValue.InactivityTimeoutSecs
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "IL" + "2.3.7.5"
-$nulevoy = "$id" + ";" + "(L1)Configure 'Interactive logon: Message text for users attempting to log on, but not empty " + ";"
+$outputLine = "$id" + ";" + "(L1)Configure 'Interactive logon: Message text for users attempting to log on, but not empty " + ";"
 $exist = Test-Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System |Select-Object LegalNoticeText
- $pustoy = $pustoy.LegalNoticeText
+ $policyValue = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System |Select-Object LegalNoticeText
+ $policyValue = $policyValue.LegalNoticeText
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "IL" + "2.3.7.6"
-$nulevoy = "$id" + ";" + "(L1)Configure Interactive logon: Message title for users attempting to log on, but not empty " + ";"
+$outputLine = "$id" + ";" + "(L1)Configure Interactive logon: Message title for users attempting to log on, but not empty " + ";"
 $exist = Test-Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System |Select-Object LegalNoticeCaption
- $pustoy = $pustoy.LegalNoticeCaption
+ $policyValue = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System |Select-Object LegalNoticeCaption
+ $policyValue = $policyValue.LegalNoticeCaption
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "IL" + "2.3.7.7"
-$nulevoy = "$id" + ";" + "(L2)Ensure interactive logon: Number of previous logons to cache (in case domain controller is not available) is set to 4 or fewer logon(s) " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure interactive logon: Number of previous logons to cache (in case domain controller is not available) is set to 4 or fewer logon(s) " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" |Select-Object CachedLogonsCount
- $pustoy = $pustoy.CachedLogonsCount
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" |Select-Object CachedLogonsCount
+ $policyValue = $policyValue.CachedLogonsCount
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "IL" + "2.3.7.8"
-$nulevoy = "$id" + ";" + "(L1)Ensure Interactive logon: Prompt user to change password before expiration is set to between 5 and 14 days " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Interactive logon: Prompt user to change password before expiration is set to between 5 and 14 days " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" |Select-Object PasswordExpiryWarning
- $pustoy = $pustoy.PasswordExpiryWarning
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" |Select-Object PasswordExpiryWarning
+ $policyValue = $policyValue.PasswordExpiryWarning
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "IL" + "2.3.7.9"
-$nulevoy = "$id" + ";" + "(L1)Ensure Interactive logon: Smart card removal behavior is set to Lock Workstation or higher,value must be 1 (Lock Workstation) or 2 (Force Logoff) " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Interactive logon: Smart card removal behavior is set to Lock Workstation or higher,value must be 1 (Lock Workstation) or 2 (Force Logoff) " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" |Select-Object ScRemoveOption
- $pustoy = $pustoy.ScRemoveOption
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" |Select-Object ScRemoveOption
+ $policyValue = $policyValue.ScRemoveOption
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin Microsoft network client audit<#########" -ForegroundColor DarkGreen
 
 
 
 $id = "MNC" + "2.3.8.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure Microsoft network client: Digitally sign communications (always) is set to Enabled,value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Microsoft network client: Digitally sign communications (always) is set to Enabled,value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" |Select-Object RequireSecuritySignature
- $pustoy = $pustoy.RequireSecuritySignature
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" |Select-Object RequireSecuritySignature
+ $policyValue = $policyValue.RequireSecuritySignature
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "MNC" + "2.3.8.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure Microsoft network client: Digitally sign communications (if server agrees) is set to Enabled,value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Microsoft network client: Digitally sign communications (if server agrees) is set to Enabled,value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" |Select-Object EnableSecuritySignature
- $pustoy = $pustoy.EnableSecuritySignature
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" |Select-Object EnableSecuritySignature
+ $policyValue = $policyValue.EnableSecuritySignature
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "MNC" + "2.3.8.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure Microsoft network client: Send unencrypted password to third-party SMB servers is set to Disabled,value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Microsoft network client: Send unencrypted password to third-party SMB servers is set to Disabled,value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" |Select-Object EnablePlainTextPassword
- $pustoy = $pustoy.EnablePlainTextPassword
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" |Select-Object EnablePlainTextPassword
+ $policyValue = $policyValue.EnablePlainTextPassword
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin Microsoft network server audit<#########" -ForegroundColor DarkGreen
 
 $id = "MNS" + "2.3.9.1"
-$nulevoy = "$id" + ";" + "(L1)Microsoft network server: Amount of idle time required before suspending session is set to 15 or fewer minute(s) but not 0, " + ";"
+$outputLine = "$id" + ";" + "(L1)Microsoft network server: Amount of idle time required before suspending session is set to 15 or fewer minute(s) but not 0, " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" |Select-Object AutoDisconnect
- $pustoy = $pustoy.AutoDisconnect
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" |Select-Object AutoDisconnect
+ $policyValue = $policyValue.AutoDisconnect
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "MNS" + "2.3.9.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure Microsoft network server: Digitally sign communications (always) is set to Enabled,must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Microsoft network server: Digitally sign communications (always) is set to Enabled,must be 1 " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" |Select-Object RequireSecuritySignature
- $pustoy = $pustoy.RequireSecuritySignature
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" |Select-Object RequireSecuritySignature
+ $policyValue = $policyValue.RequireSecuritySignature
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "MNS" + "2.3.9.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure Microsoft network server: Digitally sign communications (if client agrees) is set to Enabled,must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Microsoft network server: Digitally sign communications (if client agrees) is set to Enabled,must be 1 " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" |Select-Object EnableSecuritySignature
- $pustoy = $pustoy.EnableSecuritySignature
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" |Select-Object EnableSecuritySignature
+ $policyValue = $policyValue.EnableSecuritySignature
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "MNS" + "2.3.9.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure Microsoft network server: Disconnect clients when logon hours expire is set to Enabled,must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Microsoft network server: Disconnect clients when logon hours expire is set to Enabled,must be 1 " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" |Select-Object EnableForcedLogoff
- $pustoy = $pustoy.EnableForcedLogoff
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" |Select-Object EnableForcedLogoff
+ $policyValue = $policyValue.EnableForcedLogoff
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "MNS" + "2.3.9.5"
-$nulevoy = "$id" + ";" + "(L1)Microsoft network server: Server SPN target name validation level is set to Accept if provided by client or higher,must be 1 or highter " + ";"
+$outputLine = "$id" + ";" + "(L1)Microsoft network server: Server SPN target name validation level is set to Accept if provided by client or higher,must be 1 or highter " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" |Select-Object SMBServerNameHardeningLevel
- $pustoy = $pustoy.SMBServerNameHardeningLevel
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" |Select-Object SMBServerNameHardeningLevel
+ $policyValue = $policyValue.SMBServerNameHardeningLevel
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 Write-Host "#########>Begin Network access audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "NA" + "2.3.10.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure Network access: Allow anonymous SID/Name translation is set to Disabled,must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Network access: Allow anonymous SID/Name translation is set to Disabled,must be 0 " + ";"
 $exist = Test-Path HKLM:\System\CurrentControlSet\Control\Lsa
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\System\CurrentControlSet\Control\Lsa |Select-Object AnonymousNameLookup
- $pustoy = $pustoy.AnonymousNameLookup
+ $policyValue = Get-ItemProperty HKLM:\System\CurrentControlSet\Control\Lsa |Select-Object AnonymousNameLookup
+ $policyValue = $policyValue.AnonymousNameLookup
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "NA" + "2.3.10.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure Network access: Do not allow anonymous enumeration of SAM accounts is set to Enabled,must be 1 " + ";"
-$pustoy = Get-ItemProperty HKLM:\System\CurrentControlSet\Control\Lsa |Select-Object RestrictAnonymousSAM
-$pustoy = $pustoy.RestrictAnonymousSAM
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine = "$id" + ";" + "(L1)Ensure Network access: Do not allow anonymous enumeration of SAM accounts is set to Enabled,must be 1 " + ";"
+$policyValue = Get-ItemProperty HKLM:\System\CurrentControlSet\Control\Lsa |Select-Object RestrictAnonymousSAM
+$policyValue = $policyValue.RestrictAnonymousSAM
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "NA" + "2.3.10.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure Network access: Do not allow anonymous enumeration of SAM accounts and shares' is set to 'Enabled',must be 1 " + ";"
-$pustoy = Get-ItemProperty HKLM:\System\CurrentControlSet\Control\Lsa |Select-Object RestrictAnonymous
-$pustoy = $pustoy.RestrictAnonymous
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine = "$id" + ";" + "(L1)Ensure Network access: Do not allow anonymous enumeration of SAM accounts and shares' is set to 'Enabled',must be 1 " + ";"
+$policyValue = Get-ItemProperty HKLM:\System\CurrentControlSet\Control\Lsa |Select-Object RestrictAnonymous
+$policyValue = $policyValue.RestrictAnonymous
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "NA" + "2.3.10.4"
-$nulevoy = "$id" + ";" + "(L1)Network access: Do not allow storage of passwords and credentials for network authentication is set to Enabled,must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Network access: Do not allow storage of passwords and credentials for network authentication is set to Enabled,must be 1 " + ";"
 $exist = Test-Path HKLM:\System\CurrentControlSet\Control\Lsa
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\System\CurrentControlSet\Control\Lsa |Select-Object DisableDomainCreds
- $pustoy = $pustoy.DisableDomainCreds
+ $policyValue = Get-ItemProperty HKLM:\System\CurrentControlSet\Control\Lsa |Select-Object DisableDomainCreds
+ $policyValue = $policyValue.DisableDomainCreds
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "NA" + "2.3.10.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure Network access: Let Everyone permissions apply to anonymous users is set to Disabled,must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Network access: Let Everyone permissions apply to anonymous users is set to Disabled,must be 0 " + ";"
 $exist = Test-Path HKLM:\System\CurrentControlSet\Control\Lsa
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\System\CurrentControlSet\Control\Lsa |Select-Object EveryoneIncludesAnonymous
- $pustoy = $pustoy.EveryoneIncludesAnonymous
+ $policyValue = Get-ItemProperty HKLM:\System\CurrentControlSet\Control\Lsa |Select-Object EveryoneIncludesAnonymous
+ $policyValue = $policyValue.EveryoneIncludesAnonymous
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "NA" + "2.3.10.6"
-$nulevoy = "$id" + ";" + "(L1)Configure Network access: Named Pipes that can be accessed anonymously,must be empty " + ";"
+$outputLine = "$id" + ";" + "(L1)Configure Network access: Named Pipes that can be accessed anonymously,must be empty " + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters |Select-Object NullSessionPipes
- $pustoy = $pustoy.NullSessionPipes
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters |Select-Object NullSessionPipes
+ $policyValue = $policyValue.NullSessionPipes
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "NA" + "2.3.10.7"
-$nulevoy = "$id" + ";" + "(L1)Network access: Remotely accessible registry paths, musbe System\CurrentControlSet\Control\ProductOptions | System\CurrentControlSet\Control\Server Applications |Software\Microsoft\Windows NT\CurrentVersion " + ";"
+$outputLine = "$id" + ";" + "(L1)Network access: Remotely accessible registry paths, musbe System\CurrentControlSet\Control\ProductOptions | System\CurrentControlSet\Control\Server Applications |Software\Microsoft\Windows NT\CurrentVersion " + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Control\SecurePipeServers\Winreg\AllowedExactPaths
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\SecurePipeServers\Winreg\AllowedExactPaths |Select-Object Machine
- $pustoy = $pustoy.Machine
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\SecurePipeServers\Winreg\AllowedExactPaths |Select-Object Machine
+ $policyValue = $policyValue.Machine
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "NA" + "2.3.10.8"
-$nulevoy = "$id" + ";" + "(L1)Network access: Remotely accessible registry paths and sub-paths:, check 2.3.10.8 part for the liste" + ";"
+$outputLine = "$id" + ";" + "(L1)Network access: Remotely accessible registry paths and sub-paths:, check 2.3.10.8 part for the liste" + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Control\SecurePipeServers\Winreg\AllowedPaths
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\SecurePipeServers\Winreg\AllowedPaths |Select-Object Machine
- $pustoy = $pustoy.Machine
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\SecurePipeServers\Winreg\AllowedPaths |Select-Object Machine
+ $policyValue = $policyValue.Machine
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$pustoy > "NetworkAcces-Allowpath.txt"
-$nulevoy += "Check NetworkAcces-Allowpath.txt"
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$policyValue > "NetworkAcces-Allowpath.txt"
+$outputLine += "Check NetworkAcces-Allowpath.txt"
+$outputLine>> $fname
 
 
 $id = "NA" + "2.3.10.9"
-$nulevoy = "$id" + ";" + "Ensure Network access: Restrict anonymous access to Named Pipes and Shares is set to Enabled,value must be 1" + ";"
+$outputLine = "$id" + ";" + "Ensure Network access: Restrict anonymous access to Named Pipes and Shares is set to Enabled,value must be 1" + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters |Select-Object RestrictNullSessAccess
- $pustoy = $pustoy.RestrictNullSessAccess
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters |Select-Object RestrictNullSessAccess
+ $policyValue = $policyValue.RestrictNullSessAccess
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "NA" + "2.3.10.10"
-$nulevoy = "$id" + ";" + "(L1)Ensure Network access: Restrict clients allowed to make remote calls to SAM is set to Administrators: Remote Access: Allow" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Network access: Restrict clients allowed to make remote calls to SAM is set to Administrators: Remote Access: Allow" + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Control\Lsa
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa |Select-Object restrictremotesam
- $pustoy = $pustoy.restrictremotesam
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa |Select-Object restrictremotesam
+ $policyValue = $policyValue.restrictremotesam
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "NA" + "2.3.10.11"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Network access: Shares that can be accessed anonymously' is set to 'None, value must be empty or {}" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Network access: Shares that can be accessed anonymously' is set to 'None, value must be empty or {}" + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters |Select-Object NullSessionShares
- $pustoy = $pustoy.NullSessionShares
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters |Select-Object NullSessionShares
+ $policyValue = $policyValue.NullSessionShares
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "NA" + "2.3.10.12"
-$nulevoy = "$id" + ";" + "(L1)Ensure Network access: Sharing and security model for local accounts is set to Classic - local users authenticate as themselves,value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Network access: Sharing and security model for local accounts is set to Classic - local users authenticate as themselves,value must be 0" + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Control\Lsa
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa |Select-Object ForceGuest
- $pustoy = $pustoy.ForceGuest
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa |Select-Object ForceGuest
+ $policyValue = $policyValue.ForceGuest
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 Write-Host "#########>Begin Network security audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "NS" + "2.3.11.1"
-$nulevoy = "$id" + ";" + "(L1)Network security: Allow Local System to use computer identity for NTLM is set to 'Enabled,value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Network security: Allow Local System to use computer identity for NTLM is set to 'Enabled,value must be 1" + ";"
 $exist = Test-Path HKLM:\SYSTEM\CurrentControlSet\Control\Lsa
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa |Select-Object UseMachineId
- $pustoy = $pustoy.UseMachineId
+ $policyValue = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa |Select-Object UseMachineId
+ $policyValue = $policyValue.UseMachineId
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "NS" + "2.3.11.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure Network security: Allow LocalSystem NULL session fallback' is set to 'Disabled,value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Network security: Allow LocalSystem NULL session fallback' is set to 'Disabled,value must be 0" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0"|Select-Object AllowNullSessionFallback
- $pustoy = $pustoy.AllowNullSessionFallback
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0"|Select-Object AllowNullSessionFallback
+ $policyValue = $policyValue.AllowNullSessionFallback
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "NS" + "2.3.11.3"
-$nulevoy = "$id" + ";" + "(L1)Network Security: Allow PKU2U authentication requests to this computer to use online identities is set to Disabled,value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Network Security: Allow PKU2U authentication requests to this computer to use online identities is set to Disabled,value must be 0" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\pku2u"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\pku2u"|Select-Object AllowOnlineID
- $pustoy = $pustoy.AllowOnlineID
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\pku2u"|Select-Object AllowOnlineID
+ $policyValue = $policyValue.AllowOnlineID
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "NS" + "2.3.11.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure Network security: Configure encryption types allowed for Kerberos is set to AES128_HMAC_SHA1, AES256_HMAC_SHA1, Future encryption types" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Network security: Configure encryption types allowed for Kerberos is set to AES128_HMAC_SHA1, AES256_HMAC_SHA1, Future encryption types" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Kerberos\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Kerberos\Parameters"|Select-Object SupportedEncryptionTypes
- $pustoy = $pustoy.SupportedEncryptionTypes
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Kerberos\Parameters"|Select-Object SupportedEncryptionTypes
+ $policyValue = $policyValue.SupportedEncryptionTypes
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "NS" + "2.3.11.5"
-$nulevoy = "$id" + ";" + "(L1)Network security: Do not store LAN Manager hash value on next password change is set to Enabled,value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Network security: Do not store LAN Manager hash value on next password change is set to Enabled,value must be 1" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"|Select-Object NoLMHash
- $pustoy = $pustoy.NoLMHash
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"|Select-Object NoLMHash
+ $policyValue = $policyValue.NoLMHash
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "NS" + "2.3.11.6"
-$nulevoy = "$id" + ";" + "(L1)Network security: Force logoff when logon hours expire is set to Enabled,value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Network security: Force logoff when logon hours expire is set to Enabled,value must be 1" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters"|Select-Object EnableForcedLogOff
- $pustoy = $pustoy.EnableForcedLogOff
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters"|Select-Object EnableForcedLogOff
+ $policyValue = $policyValue.EnableForcedLogOff
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "NS" + "2.3.11.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure Network security: LAN Manager authentication level is set to Send NTLMv2 response only. Refuse LM & NTLM,value must be 5" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Network security: LAN Manager authentication level is set to Send NTLMv2 response only. Refuse LM & NTLM,value must be 5" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"|Select-Object LmCompatibilityLevel
- $pustoy = $pustoy.LmCompatibilityLevel
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"|Select-Object LmCompatibilityLevel
+ $policyValue = $policyValue.LmCompatibilityLevel
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "NS" + "2.3.11.8"
-$nulevoy = "$id" + ";" + "(L1)Ensure Network security: LDAP client signing requirements is set to Negotiate signing or higher,value must be 1 or highter" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Network security: LDAP client signing requirements is set to Negotiate signing or higher,value must be 1 or highter" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\LDAP"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LDAP"|Select-Object LDAPClientIntegrity
- $pustoy = $pustoy.LDAPClientIntegrity
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LDAP"|Select-Object LDAPClientIntegrity
+ $policyValue = $policyValue.LDAPClientIntegrity
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "NS" + "2.3.11.9"
-$nulevoy = "$id" + ";" + "(L1)Ensure Network security: Minimum session security for NTLM SSP based (including secure RPC) clients is set to Require NTLMv2 session security, Require 128-bit encryption,value must be 537395200" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Network security: Minimum session security for NTLM SSP based (including secure RPC) clients is set to Require NTLMv2 session security, Require 128-bit encryption,value must be 537395200" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0"|Select-Object NTLMMinClientSec
- $pustoy = $pustoy.NTLMMinClientSec
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0"|Select-Object NTLMMinClientSec
+ $policyValue = $policyValue.NTLMMinClientSec
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "NS" + "2.3.11.10"
-$nulevoy = "$id" + ";" + "(L1)Network security: Minimum session security for NTLM SSP based (including secure RPC) clients' is set to 'Require NTLMv2 session security, Require 128-bit encryption', Require 128-bit encryption,value must be 537395200" + ";"
+$outputLine = "$id" + ";" + "(L1)Network security: Minimum session security for NTLM SSP based (including secure RPC) clients' is set to 'Require NTLMv2 session security, Require 128-bit encryption', Require 128-bit encryption,value must be 537395200" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0"|Select-Object NTLMMinServerSec
- $pustoy = $pustoy.NTLMMinServerSec
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0"|Select-Object NTLMMinServerSec
+ $policyValue = $policyValue.NTLMMinServerSec
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin System cryptography<#########" -ForegroundColor DarkGreen
 
@@ -2114,22 +1910,20 @@ Write-Host "#########>Begin System cryptography<#########" -ForegroundColor Dark
 
 
 $id = "SC" + "2.3.14.1"
-$nulevoy = "$id" + ";" + "(L2)System cryptography: Force strong key protection for user keys stored on the computer' is set to 'User is prompted when the key is first used' or higher,value must be 2 " + ";"
+$outputLine = "$id" + ";" + "(L2)System cryptography: Force strong key protection for user keys stored on the computer' is set to 'User is prompted when the key is first used' or higher,value must be 2 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Cryptography"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Cryptography"|Select-Object ForceKeyProtection
- $pustoy = $pustoy.ForceKeyProtection
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Cryptography"|Select-Object ForceKeyProtection
+ $policyValue = $policyValue.ForceKeyProtection
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin System objects audit<#########" -ForegroundColor DarkGreen
 
@@ -2137,1033 +1931,923 @@ Write-Host "#########>Begin System objects audit<#########" -ForegroundColor Dar
 
 
 $id = "SO" + "2.3.15.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure System objects: Require case insensitivity for non-Windows subsystems is set to Enabled,value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure System objects: Require case insensitivity for non-Windows subsystems is set to Enabled,value must be 1" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Kernel"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Kernel"|Select-Object ObCaseInsensitive
- $pustoy = $pustoy.ObCaseInsensitive
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Kernel"|Select-Object ObCaseInsensitive
+ $policyValue = $policyValue.ObCaseInsensitive
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 
 $id = "SO" + "2.3.15.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure System objects: Strengthen default permissions of internal system objects (e.g. Symbolic Links) is set to Enabled,value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure System objects: Strengthen default permissions of internal system objects (e.g. Symbolic Links) is set to Enabled,value must be 1" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager"|Select-Object ProtectionMode
- $pustoy = $pustoy.ProtectionMode
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager"|Select-Object ProtectionMode
+ $policyValue = $policyValue.ProtectionMode
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 Write-Host "#########>Begin User Account Control(UAC) audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "UAC" + "2.3.17.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure User Account Control: Admin Approval Mode for the Built-in Administrator account is set to Enabled,value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure User Account Control: Admin Approval Mode for the Built-in Administrator account is set to Enabled,value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object FilterAdministratorToken
- $pustoy = $pustoy.FilterAdministratorToken
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object FilterAdministratorToken
+ $policyValue = $policyValue.FilterAdministratorToken
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "UAC" + "2.3.17.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'User Account Control: Behavior of the elevation prompt for administrators in Admin Approval Mode is set to Prompt for consent on the secure desktop,value must be 2(The value of 2 displays the UAC prompt that needs to be permitted or denied on a secure desktop. No authentication is required) or 1(A value of 1 requires the admin to enter username and password when operations require elevated privileges on a secure desktop)" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'User Account Control: Behavior of the elevation prompt for administrators in Admin Approval Mode is set to Prompt for consent on the secure desktop,value must be 2(The value of 2 displays the UAC prompt that needs to be permitted or denied on a secure desktop. No authentication is required) or 1(A value of 1 requires the admin to enter username and password when operations require elevated privileges on a secure desktop)" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object ConsentPromptBehaviorAdmin
- $pustoy = $pustoy.ConsentPromptBehaviorAdmin
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object ConsentPromptBehaviorAdmin
+ $policyValue = $policyValue.ConsentPromptBehaviorAdmin
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 
 $id = "UAC" + "2.3.17.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure User Account Control: Behavior of the elevation prompt for standard users is set to Automatically deny elevation requests, value must be 0(A value of 0 will automatically deny any operation that requires elevated privileges if executed by standard users)." + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure User Account Control: Behavior of the elevation prompt for standard users is set to Automatically deny elevation requests, value must be 0(A value of 0 will automatically deny any operation that requires elevated privileges if executed by standard users)." + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object ConsentPromptBehaviorUser
- $pustoy = $pustoy.ConsentPromptBehaviorUser
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object ConsentPromptBehaviorUser
+ $policyValue = $policyValue.ConsentPromptBehaviorUser
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "UAC" + "2.3.17.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'User Account Control: Detect application installations and prompt for elevation' is set to Enabled, value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'User Account Control: Detect application installations and prompt for elevation' is set to Enabled, value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object EnableInstallerDetection
- $pustoy = $pustoy.EnableInstallerDetection
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object EnableInstallerDetection
+ $policyValue = $policyValue.EnableInstallerDetection
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "UAC" + "2.3.17.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'User Account Control: Only elevate UIAccess applications that are installed in secure locations' is set to 'Enabled, value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'User Account Control: Only elevate UIAccess applications that are installed in secure locations' is set to 'Enabled, value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object EnableSecureUIAPaths
- $pustoy = $pustoy.EnableSecureUIAPaths
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object EnableSecureUIAPaths
+ $policyValue = $policyValue.EnableSecureUIAPaths
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "UAC" + "2.3.17.6"
-$nulevoy = "$indextest" + ";" + "(L1)Ensure 'User Account Control: Run all administrators in Admin Approval Mode is set to Enabled, value must be 1" + ";"
+$outputLine = "$indextest" + ";" + "(L1)Ensure 'User Account Control: Run all administrators in Admin Approval Mode is set to Enabled, value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object EnableLUA
- $pustoy = $pustoy.EnableLUA
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object EnableLUA
+ $policyValue = $policyValue.EnableLUA
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "UAC" + "2.3.17.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'User Account Control: Switch to the secure desktop when prompting for elevation' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'User Account Control: Switch to the secure desktop when prompting for elevation' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object PromptOnSecureDesktop
- $pustoy = $pustoy.PromptOnSecureDesktop
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object PromptOnSecureDesktop
+ $policyValue = $policyValue.PromptOnSecureDesktop
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "UAC" + "2.3.17.8"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'User Account Control: Virtualize file and registry write failures to per-user locations' is set to 'Enabled, value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'User Account Control: Virtualize file and registry write failures to per-user locations' is set to 'Enabled, value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object EnableVirtualization
- $pustoy = $pustoy.EnableVirtualization
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object EnableVirtualization
+ $policyValue = $policyValue.EnableVirtualization
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin System Services audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "SS" + "5.1"
-$nulevoy = "$id" + ";" + "Ensure 'Bluetooth Audio Gateway Service (BTAGService)' is set to 'Disabled', value must be 4" + ";"
+$outputLine = "$id" + ";" + "Ensure 'Bluetooth Audio Gateway Service (BTAGService)' is set to 'Disabled', value must be 4" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\BTAGService"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\BTAGService"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\BTAGService"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed "
+ $policyValue = "It s not installed "
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.2"
-$nulevoy = "$id" + ";" + "(L2)Ensure Bluetooth Support Service (bthserv)' is set to 'Disabled', value must be 4" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure Bluetooth Support Service (bthserv)' is set to 'Disabled', value must be 4" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\bthserv"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\bthserv"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\bthserv"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Computer Browser (Browser)' is set to 'Disabled' or 'Not Installed'', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Computer Browser (Browser)' is set to 'Disabled' or 'Not Installed'', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\Browser"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Browser"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Browser"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.4"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Downloaded Maps Manager (MapsBroker)' is set to 'Disabled', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Downloaded Maps Manager (MapsBroker)' is set to 'Disabled', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\MapsBroker"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\MapsBroker"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\MapsBroker"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.5"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Geolocation Service (lfsvc)' is set to 'Disabled', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Geolocation Service (lfsvc)' is set to 'Disabled', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\lfsvc"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\lfsvc"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\lfsvc"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "SS" + "5.6"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'IIS Admin Service (IISADMIN)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'IIS Admin Service (IISADMIN)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\IISADMIN"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\IISADMIN"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\IISADMIN"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Infrared monitor service (irmon)' is set to 'Disabled', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Infrared monitor service (irmon)' is set to 'Disabled', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\irmon"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\irmon"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\irmon"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.8"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Internet Connection Sharing (ICS) (SharedAccess) ' is set to 'Disabled', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Internet Connection Sharing (ICS) (SharedAccess) ' is set to 'Disabled', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.9"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Link-Layer Topology Discovery Mapper (lltdsvc)' is set to 'Disabled', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Link-Layer Topology Discovery Mapper (lltdsvc)' is set to 'Disabled', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\lltdsvc"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\lltdsvc"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\lltdsvc"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.10"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'LxssManager (LxssManager)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'LxssManager (LxssManager)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\LxssManager"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LxssManager"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LxssManager"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.11"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Microsoft FTP Service (FTPSVC)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Microsoft FTP Service (FTPSVC)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\FTPSVC"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\FTPSVC"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\FTPSVC"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.12"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Microsoft iSCSI Initiator Service (MSiSCSI)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Microsoft iSCSI Initiator Service (MSiSCSI)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\MSiSCSI"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\MSiSCSI"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\MSiSCSI"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.13"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'OpenSSH SSH Server (sshd)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'OpenSSH SSH Server (sshd)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\sshd"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\sshd"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\sshd"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.14"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Peer Name Resolution Protocol (PNRPsvc)' is set to 'Disabled'or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Peer Name Resolution Protocol (PNRPsvc)' is set to 'Disabled'or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\PNRPsvc"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\PNRPsvc"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\PNRPsvc"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.15"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Peer Networking Grouping (p2psvc)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Peer Networking Grouping (p2psvc)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\p2psvc"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\p2psvc"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\p2psvc"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.16"
-$nulevoy = "$id" + ";" + "Ensure 'Peer Networking Identity Manager (p2pimsvc)' is set to 'Disabled or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "Ensure 'Peer Networking Identity Manager (p2pimsvc)' is set to 'Disabled or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\p2pimsvc"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\p2pimsvc"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\p2pimsvc"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.17"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'PNRP Machine Name Publication Service (PNRPAutoReg)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'PNRP Machine Name Publication Service (PNRPAutoReg)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\PNRPAutoReg"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\PNRPAutoReg"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\PNRPAutoReg"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.18"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Print Spooler (Spooler)' is set to 'Disabled' (Automated), value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Print Spooler (Spooler)' is set to 'Disabled' (Automated), value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\Spooler"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Spooler"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Spooler"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 
 $id = "SS" + "5.19"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Problem Reports and Solutions Control Panel Support (wercplsupport)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Problem Reports and Solutions Control Panel Support (wercplsupport)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\wercplsupport"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\wercplsupport"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\wercplsupport"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.20"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Remote Access Auto Connection Manager (RasAuto)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Remote Access Auto Connection Manager (RasAuto)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\RasAuto"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\RasAuto"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\RasAuto"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.21"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Remote Desktop Configuration (SessionEnv)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Remote Desktop Configuration (SessionEnv)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\SessionEnv"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\SessionEnv"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\SessionEnv"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.22"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Remote Desktop Services (TermService)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Remote Desktop Services (TermService)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\TermService"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\TermService"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\TermService"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.23"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Remote Desktop Services UserMode Port Redirector (UmRdpService) is set to Disabled or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Remote Desktop Services UserMode Port Redirector (UmRdpService) is set to Disabled or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\UmRdpService"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\UmRdpService"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\UmRdpService"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.24"
-$nulevoy = "$id" + ";" + "sshdEnsure 'Remote Procedure Call (RPC) Locator (RpcLocator)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "sshdEnsure 'Remote Procedure Call (RPC) Locator (RpcLocator)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\RpcLocator"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\RpcLocator"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\RpcLocator"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.25"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Remote Registry (RemoteRegistry)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Remote Registry (RemoteRegistry)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\RemoteRegistry"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\RemoteRegistry"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\RemoteRegistry"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.26"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Routing and Remote Access (RemoteAccess)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Routing and Remote Access (RemoteAccess)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\RemoteAccess"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\RemoteAccess"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\RemoteAccess"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.27"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Server (LanmanServer)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Server (LanmanServer)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.28"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Simple TCP/IP Services (simptcp)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Simple TCP/IP Services (simptcp)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\simptcp"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\simptcp"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\simptcp"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.29"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'SNMP Service (SNMP)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'SNMP Service (SNMP)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\SNMP"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\SNMP"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\SNMP"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.30"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Special Administration Console Helper (sacsvr)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Special Administration Console Helper (sacsvr)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\sacsvr"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\sacsvr"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\sacsvr"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 
 $id = "SS" + "5.31"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'SSDP Discovery (SSDPSRV)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'SSDP Discovery (SSDPSRV)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\SSDPSRV"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\SSDPSRV"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\SSDPSRV"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.32"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'UPnP Device Host (upnphost)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'UPnP Device Host (upnphost)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\upnphost"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\upnphost"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\upnphost"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.33"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Web Management Service (WMSvc)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Web Management Service (WMSvc)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\WMSvc"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WMSvc"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WMSvc"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.34"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Windows Error Reporting Service (WerSvc) is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Windows Error Reporting Service (WerSvc) is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\WerSvc"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WerSvc"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WerSvc"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.35"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Windows Event Collector (Wecsvc)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Windows Event Collector (Wecsvc)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\Wecsvc"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Wecsvc"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Wecsvc"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.36"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Media Player Network Sharing Service (WMPNetworkSvc)'''' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Media Player Network Sharing Service (WMPNetworkSvc)'''' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\WMPNetworkSvc"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WMPNetworkSvc"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WMPNetworkSvc"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.37"
-$nulevoy = "$id" + ";" + "(L1)Ensure Windows Mobile Hotspot Service (icssvc)'' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Windows Mobile Hotspot Service (icssvc)'' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\icssvc"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\icssvc"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\icssvc"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.38"
-$nulevoy = "$id" + ";" + "(L2)Ensure Windows Push Notifications System Service (WpnService)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure Windows Push Notifications System Service (WpnService)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\WpnService"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WpnService"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WpnService"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "SS" + "5.39"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Windows PushToInstall Service (PushToInstall)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Windows PushToInstall Service (PushToInstall)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\PushToInstall"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\PushToInstall"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\PushToInstall"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.40"
-$nulevoy = "$id" + ";" + "(L2)Ensure Windows Remote Management (WS-Management) (WinRM) is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure Windows Remote Management (WS-Management) (WinRM) is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\WinRM"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WinRM"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WinRM"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "SS" + "5.41"
-$nulevoy = "$id" + ";" + "(L1)Ensure World Wide Web Publishing Service (W3SVC)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure World Wide Web Publishing Service (W3SVC)' is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\W3SVC"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\W3SVC"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\W3SVC"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "SS" + "5.42"
-$nulevoy = "$id" + ";" + "(L1)Ensure Xbox Accessory Management Service (XboxGipSvc) is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Xbox Accessory Management Service (XboxGipSvc) is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\XboxGipSvc"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\XboxGipSvc"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\XboxGipSvc"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "SS" + "5.43"
-$nulevoy = "$id" + ";" + "(L1)Ensure Xbox Live Auth Manager (XblAuthManager) s set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Xbox Live Auth Manager (XblAuthManager) s set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\XblAuthManager"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\XblAuthManager"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\XblAuthManager"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.44"
-$nulevoy = "$id" + ";" + "(L1)Ensure Xbox Live Game Save (XblGameSave) is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Xbox Live Game Save (XblGameSave) is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\XblGameSave"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\XblGameSave"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\XblGameSave"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "SS" + "5.45"
-$nulevoy = "$id" + ";" + "(L1)Ensure Xbox Live Networking Service (XboxNetApiSvc) is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Xbox Live Networking Service (XboxNetApiSvc) is set to 'Disabled' or 'Not Installed', value must be 4 or not installed" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\XboxNetApiSvc"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\XboxNetApiSvc"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\XboxNetApiSvc"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "It s not installed"
+ $policyValue = "It s not installed"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin Firewall Domain Profile audit<#########" -ForegroundColor DarkGreen
 
@@ -3172,103 +2856,87 @@ Write-Host "#########>Begin Firewall Domain Profile audit<#########" -Foreground
 
 
 $id = "WFDP" + "9.1.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Firewall state' is set to 'On, value must be True" + ";"
-$pustoy = Get-NetFirewallProfile -Name "Domain" |Select-Object Enabled
-$pustoy = $pustoy.Enabled
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Firewall state' is set to 'On, value must be True" + ";"
+$policyValue = Get-NetFirewallProfile -Name "Domain" |Select-Object Enabled
+$policyValue = $policyValue.Enabled
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "WFDP" + "9.1.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Inbound connections' is set to 'Block (default), value must be Block" + ";"
-$pustoy = Get-NetFirewallProfile -Name "Domain" |Select-Object DefaultInboundAction
-$pustoy = $pustoy.DefaultInboundAction
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Inbound connections' is set to 'Block (default), value must be Block" + ";"
+$policyValue = Get-NetFirewallProfile -Name "Domain" |Select-Object DefaultInboundAction
+$policyValue = $policyValue.DefaultInboundAction
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "WFDP" + "9.1.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Outbound connections' is set to 'Allow (default), value must be Allow but if it's block it s fucking badass" + ";"
-$pustoy = Get-NetFirewallProfile -Name "Domain" |Select-Object DefaultOutboundAction
-$pustoy = $pustoy.DefaultOutboundAction
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Outbound connections' is set to 'Allow (default), value must be Allow but if it's block it s fucking badass" + ";"
+$policyValue = Get-NetFirewallProfile -Name "Domain" |Select-Object DefaultOutboundAction
+$policyValue = $policyValue.DefaultOutboundAction
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "WFDP" + "9.1.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Settings: Display a notification' is set to 'No', value must false " + ";"
-$pustoy = Get-NetFirewallProfile -Name "Domain" |Select-Object NotifyOnListen
-$pustoy = $pustoy.NotifyOnListen
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Settings: Display a notification' is set to 'No', value must false " + ";"
+$policyValue = Get-NetFirewallProfile -Name "Domain" |Select-Object NotifyOnListen
+$policyValue = $policyValue.NotifyOnListen
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "WFDP" + "9.1.5"
 
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Logging: Name' is set to '%SYSTEMROOT%\System32\logfiles\firewall\domainfw.log " + ";"
-$pustoy = Get-NetFirewallProfile -Name "Domain" |Select-Object LogFileName
-$pustoy = $pustoy.LogFileName
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Logging: Name' is set to '%SYSTEMROOT%\System32\logfiles\firewall\domainfw.log " + ";"
+$policyValue = Get-NetFirewallProfile -Name "Domain" |Select-Object LogFileName
+$policyValue = $policyValue.LogFileName
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "WFDP" + "9.1.6"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Logging: Size limit (KB)' is set to '16,384 KB or greater, value must 16384 or higthter " + ";"
-$pustoy = Get-NetFirewallProfile -Name "Domain" |Select-Object LogMaxSizeKilobytes
-$pustoy = $pustoy.LogMaxSizeKilobytes
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Logging: Size limit (KB)' is set to '16,384 KB or greater, value must 16384 or higthter " + ";"
+$policyValue = Get-NetFirewallProfile -Name "Domain" |Select-Object LogMaxSizeKilobytes
+$policyValue = $policyValue.LogMaxSizeKilobytes
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "WFDP" + "9.1.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Logging: Log dropped packets' is set to 'Yes',value must be true " + ";"
-$pustoy = Get-NetFirewallProfile -Name "Domain" |Select-Object LogBlocked
-$pustoy = $pustoy.LogBlocked
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Logging: Log dropped packets' is set to 'Yes',value must be true " + ";"
+$policyValue = Get-NetFirewallProfile -Name "Domain" |Select-Object LogBlocked
+$policyValue = $policyValue.LogBlocked
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "WFDP" + "9.1.8"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Logging: Log successful connections' is set to 'Yes,value must be true " + ";"
-$pustoy = Get-NetFirewallProfile -Name "Domain" |Select-Object LogAllowed
-$pustoy = $pustoy.LogAllowed
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Domain: Logging: Log successful connections' is set to 'Yes,value must be true " + ";"
+$policyValue = Get-NetFirewallProfile -Name "Domain" |Select-Object LogAllowed
+$policyValue = $policyValue.LogAllowed
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin Firewall Private Profile audit<#########" -ForegroundColor DarkGreen
 
@@ -3276,105 +2944,89 @@ Write-Host "#########>Begin Firewall Private Profile audit<#########" -Foregroun
 
 
 $id = "WFPPRIP" + "9.2.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Firewall state' is set to 'On, value must be True" + ";"
-$pustoy = Get-NetFirewallProfile -Name "Private" |Select-Object Enabled
-$pustoy = $pustoy.Enabled
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Firewall state' is set to 'On, value must be True" + ";"
+$policyValue = Get-NetFirewallProfile -Name "Private" |Select-Object Enabled
+$policyValue = $policyValue.Enabled
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "WFPPRIP" + "9.2.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Inbound connections' is set to 'Block (default, value must be Block" + ";"
-$pustoy = Get-NetFirewallProfile -Name "Private" |Select-Object DefaultInboundAction
-$pustoy = $pustoy.DefaultInboundAction
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Inbound connections' is set to 'Block (default, value must be Block" + ";"
+$policyValue = Get-NetFirewallProfile -Name "Private" |Select-Object DefaultInboundAction
+$policyValue = $policyValue.DefaultInboundAction
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "WFPPRIP" + "9.2.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Outbound connections' is set to 'Allow (default)', value must be Allow but if it's block it s fucking badass" + ";"
-$pustoy = Get-NetFirewallProfile -Name "Private" |Select-Object DefaultOutboundAction
-$pustoy = $pustoy.DefaultOutboundAction
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Outbound connections' is set to 'Allow (default)', value must be Allow but if it's block it s fucking badass" + ";"
+$policyValue = Get-NetFirewallProfile -Name "Private" |Select-Object DefaultOutboundAction
+$policyValue = $policyValue.DefaultOutboundAction
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "WFPPRIP" + "9.2.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Settings: Display a notification' is set to 'No, value must false " + ";"
-$pustoy = Get-NetFirewallProfile -Name "Private" |Select-Object NotifyOnListen
-$pustoy = $pustoy.NotifyOnListen
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Settings: Display a notification' is set to 'No, value must false " + ";"
+$policyValue = Get-NetFirewallProfile -Name "Private" |Select-Object NotifyOnListen
+$policyValue = $policyValue.NotifyOnListen
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "WFPPRIP" + "9.2.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Logging: Name' is set to '%SYSTEMROOT%\System32\logfiles\firewall\privatefw.log " + ";"
-$pustoy = Get-NetFirewallProfile -Name "Private" |Select-Object LogFileName
-$pustoy = $pustoy.LogFileName
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Logging: Name' is set to '%SYSTEMROOT%\System32\logfiles\firewall\privatefw.log " + ";"
+$policyValue = Get-NetFirewallProfile -Name "Private" |Select-Object LogFileName
+$policyValue = $policyValue.LogFileName
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "WFPPRIP" + "9.2.6"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Logging: Size limit (KB)' is set to '16,384 KB or greater, value must 16384 or higthter " + ";"
-$pustoy = Get-NetFirewallProfile -Name "Private" |Select-Object LogMaxSizeKilobytes
-$pustoy = $pustoy.LogMaxSizeKilobytes
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Logging: Size limit (KB)' is set to '16,384 KB or greater, value must 16384 or higthter " + ";"
+$policyValue = Get-NetFirewallProfile -Name "Private" |Select-Object LogMaxSizeKilobytes
+$policyValue = $policyValue.LogMaxSizeKilobytes
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "WFPPRIP" + "9.2.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Logging: Log dropped packets' is set to 'Yes',value must be true " + ";"
-$pustoy = Get-NetFirewallProfile -Name "Private" |Select-Object LogBlocked
-$pustoy = $pustoy.LogBlocked
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Logging: Log dropped packets' is set to 'Yes',value must be true " + ";"
+$policyValue = Get-NetFirewallProfile -Name "Private" |Select-Object LogBlocked
+$policyValue = $policyValue.LogBlocked
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "WFPPRIP" + "9.2.8"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Logging: Log successful connections' is set to 'Yes',value must be true " + ";"
-$pustoy = Get-NetFirewallProfile -Name "Domain" |Select-Object LogAllowed
-$pustoy = $pustoy.LogAllowed
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Private: Logging: Log successful connections' is set to 'Yes',value must be true " + ";"
+$policyValue = Get-NetFirewallProfile -Name "Domain" |Select-Object LogAllowed
+$policyValue = $policyValue.LogAllowed
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 Write-Host "#########>Begin Firewall Public Profile audit<#########" -ForegroundColor DarkGreen
@@ -3383,548 +3035,460 @@ Write-Host "#########>Begin Firewall Public Profile audit<#########" -Foreground
 
 
 $id = "WFPPUBP" + "9.3.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Firewall state' is set to 'On, value must be True" + ";"
-$pustoy = Get-NetFirewallProfile -Name "Public" |Select-Object Enabled
-$pustoy = $pustoy.Enabled
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Firewall state' is set to 'On, value must be True" + ";"
+$policyValue = Get-NetFirewallProfile -Name "Public" |Select-Object Enabled
+$policyValue = $policyValue.Enabled
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "WFPPUBP" + "9.3.2"
-$nulevoy = "$id" + ";" + "(L1)Windows Firewall: Public: Inbound connections' is set to 'Block , value must be Block" + ";"
-$pustoy = Get-NetFirewallProfile -Name "Public" |Select-Object DefaultInboundAction
-$pustoy = $pustoy.DefaultInboundAction
+$outputLine = "$id" + ";" + "(L1)Windows Firewall: Public: Inbound connections' is set to 'Block , value must be Block" + ";"
+$policyValue = Get-NetFirewallProfile -Name "Public" |Select-Object DefaultInboundAction
+$policyValue = $policyValue.DefaultInboundAction
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "WFPPUBP" + "9.3.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Outbound connections' is set to 'Allow (default), value must be Allow but if it's block it s fucking badass" + ";"
-$pustoy = Get-NetFirewallProfile -Name "Public" |Select-Object DefaultOutboundAction
-$pustoy = $pustoy.DefaultOutboundAction
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Outbound connections' is set to 'Allow (default), value must be Allow but if it's block it s fucking badass" + ";"
+$policyValue = Get-NetFirewallProfile -Name "Public" |Select-Object DefaultOutboundAction
+$policyValue = $policyValue.DefaultOutboundAction
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "WFPPUBP" + "9.3.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Settings: Display a notification' is set to 'Yes, value must false " + ";"
-$pustoy = Get-NetFirewallProfile -Name "Public" |Select-Object NotifyOnListen
-$pustoy = $pustoy.NotifyOnListen
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Settings: Display a notification' is set to 'Yes, value must false " + ";"
+$policyValue = Get-NetFirewallProfile -Name "Public" |Select-Object NotifyOnListen
+$policyValue = $policyValue.NotifyOnListen
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "WFPPUBP" + "9.3.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Settings: Apply local firewall rules' is set to 'No, value must 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Settings: Apply local firewall rules' is set to 'No, value must 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\WindowsFirewall\PublicProfile"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsFirewall\PublicProfile"|Select-Object AllowLocalPolicyMerge
- $pustoy = $pustoy.AllowLocalPolicyMerge
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsFirewall\PublicProfile"|Select-Object AllowLocalPolicyMerge
+ $policyValue = $policyValue.AllowLocalPolicyMerge
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "WFPPUBP" + "9.3.6"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Settings: Apply local connection security rules' is set to 'No', value must 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Settings: Apply local connection security rules' is set to 'No', value must 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\WindowsFirewall\PublicProfile"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsFirewall\PublicProfile"|Select-Object AllowLocalIPsecPolicyMerge
- $pustoy = $pustoy.AllowLocalIPsecPolicyMerge
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsFirewall\PublicProfile"|Select-Object AllowLocalIPsecPolicyMerge
+ $policyValue = $policyValue.AllowLocalIPsecPolicyMerge
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "WFPPUBP" + "9.3.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Logging: Name' is set to '%SYSTEMROOT%\System32\logfiles\firewall\publicfw.log" + ";"
-$pustoy = Get-NetFirewallProfile -Name "Public" |Select-Object LogFileName
-$pustoy = $pustoy.LogFileName
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Logging: Name' is set to '%SYSTEMROOT%\System32\logfiles\firewall\publicfw.log" + ";"
+$policyValue = Get-NetFirewallProfile -Name "Public" |Select-Object LogFileName
+$policyValue = $policyValue.LogFileName
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "WFPPUBP" + "9.3.8"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Logging: Size limit (KB)' is set to '16,384 KB or greater" + ";"
-$pustoy = Get-NetFirewallProfile -Name "Public" |Select-Object LogMaxSizeKilobytes
-$pustoy = $pustoy.LogMaxSizeKilobytes
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Logging: Size limit (KB)' is set to '16,384 KB or greater" + ";"
+$policyValue = Get-NetFirewallProfile -Name "Public" |Select-Object LogMaxSizeKilobytes
+$policyValue = $policyValue.LogMaxSizeKilobytes
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "WFPPUBP" + "9.3.9"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Logging: Log dropped packets' is set to 'Yes',value must be true " + ";"
-$pustoy = Get-NetFirewallProfile -Name "Public" |Select-Object LogBlocked
-$pustoy = $pustoy.LogBlocked
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Logging: Log dropped packets' is set to 'Yes',value must be true " + ";"
+$policyValue = Get-NetFirewallProfile -Name "Public" |Select-Object LogBlocked
+$policyValue = $policyValue.LogBlocked
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "WFPPUBP" + "9.3.10"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Logging: Log successful connections' is set to 'Yes',value must be true " + ";"
-$pustoy = Get-NetFirewallProfile -Name "Public" |Select-Object LogAllowed
-$pustoy = $pustoy.LogAllowed
+$outputLine = "$id" + ";" + "(L1)Ensure 'Windows Firewall: Public: Logging: Log successful connections' is set to 'Yes',value must be true " + ";"
+$policyValue = Get-NetFirewallProfile -Name "Public" |Select-Object LogAllowed
+$policyValue = $policyValue.LogAllowed
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin Advanced Audit Policy audit<#########" -ForegroundColor DarkGreen
 
+$auditPolicyLookup = @{}
+Get-AuditPolicy -Subcategory * | ForEach-Object {
+ $auditPolicyLookup[$_.Subcategory] = $_.Setting
+}
+function Get-AuditPolicySummary {
+ param(
+  [string]$Subcategory,
+  [string]$Label
+ )
+ if (-not $Label) {
+  $Label = $Subcategory
+ }
+ $setting = $auditPolicyLookup[$Subcategory]
+ if ([string]::IsNullOrEmpty($setting)) {
+  $setting = "NotConfigured"
+ }
+ return ("{0}:{1}" -f $Label, $setting)
+}
 
 $id = "AAAL" + "17.1.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Credential Validation' is set to 'Success and Failure" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Validation des informations d'identification)|(Credential Validation)"
-$pustoy = $pustoy.line
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Credential Validation' is set to 'Success and Failure" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Credential Validation"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "AAGM" + "17.2.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Security Group Management' is set to 'Success and Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Gestion des groupes de sA'AAcuritA'AA)|(Security Group Management)"
-$pustoy = $pustoy.line
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Security Group Management' is set to 'Success and Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Security Group Management"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AAGM" + "17.2.3"
-$nulevoy = "$indextest" + ";" + "(L1)Ensure 'Audit User Account Management' is set to 'Success and Failure" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Gestion des comptes d'utilisateur)|(User Account Management)"
-$pustoy = $pustoy.line
+$outputLine = "$indextest" + ";" + "(L1)Ensure 'Audit User Account Management' is set to 'Success and Failure" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "User Account Management"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AADT" + "17.3.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit PNP Activity' is set to 'Success'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(A'AAvA'AAnements Plug-and-Play)|(PNP Activity)"
-$pustoy = $pustoy.line
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit PNP Activity' is set to 'Success'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Plug and Play Events" -Label "PNP Activity"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AADT" + "17.3.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Process Creation' is set to 'Success" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(CrA'AAation du processus)|(Process Creation)"
-$pustoy = $pustoy.line
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Process Creation' is set to 'Success" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Process Creation"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "AALL" + "17.5.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Account Lockout' is set to Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Verrouillage du compte)|(Account Lockout)"
-$pustoy = $pustoy.line
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Account Lockout' is set to Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Account Lockout"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "AALL" + "17.5.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Group Membership' is set to 'Success" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Appartenance A'AA un groupe)|(Group Membership)"
-$pustoy = $pustoy.line
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Group Membership' is set to 'Success" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Group Membership"
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "AALL" + "17.5.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Logoff' is set to 'Success'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Fermer la session)|(Logoff)"
-$pustoy = $pustoy.line
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Logoff' is set to 'Success'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Logoff"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AALL" + "17.5.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Logon' is set to 'Success and Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Ouvrir la session)|(Logon)"
-$pustoy = $pustoy.line
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Logon' is set to 'Success and Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Logon"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AALL" + "17.5.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Other Logon/Logoff Events' is set to 'Success and Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Autres A'AAvA'AAnements d'ouverture/fermeture de session)|(Other Logon/Logoff Events)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Other Logon/Logoff Events' is set to 'Success and Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Other Logon/Logoff Events"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "AALL" + "17.5.6"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Special Logon' is set to 'Success'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Ouverture de session spA'AAciale)|(Special Logon)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Special Logon' is set to 'Success'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Special Logon"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AAOA" + "17.6.1"
-$nulevoy = "$id" + ";" + "(L1)Encdsure Audit Detailed File Share is set to Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Partage de fichiers dA'AAtaillA'AA )|(Detailed File Share)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Encdsure Audit Detailed File Share is set to Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Detailed File Share"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "AAOA" + "17.6.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit File Share'''' is set to 'Success and Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Partage de fichiers)|(File share)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit File Share'''' is set to 'Success and Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "File Share"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AAOA" + "17.6.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Other Object Access Events''''' is set to 'Success and Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Autres A'AAvA'AAnements d'accA''AA s A''AA  l'objet)|(Other Object Access Event)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Other Object Access Events''''' is set to 'Success and Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Other Object Access Events"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AAOA" + "17.6.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Removable Storage' is set to 'Success and Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Stockage amovible)|(Removable Storage)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Removable Storage' is set to 'Success and Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Removable Storage"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "AAPC" + "17.7.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Audit Policy Change' is set to 'Success and Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Modification de la stratA'AAgie d'audit)|(Audit Policy Change)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Audit Policy Change' is set to 'Success and Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Audit Policy Change"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AAPC" + "17.7.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Authentication Policy Change' is set to 'Success''" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Modification de la stratA'AAgie d'authentification)|(Authentication Policy Change)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Authentication Policy Change' is set to 'Success''" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Authentication Policy Change"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AAPC" + "17.7.3"
-$nulevoy = "$id" + ";" + "Ensure 'Audit Authorization Policy Change' is set to 'Success''" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Modification de la stratA'AAgie d'autorisation)|(Authorization Policy Change)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "Ensure 'Audit Authorization Policy Change' is set to 'Success''" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Authorization Policy Change"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AAPU" + "17.7.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit MPSSVC Rule-Level Policy Change is set to 'Success and Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Modification de la stratA'AAgie de niveau rA'AA gle MPSSVC)|(MPSSVC Rule-Level Policy Change)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit MPSSVC Rule-Level Policy Change is set to 'Success and Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "MPSSVC Rule-Level Policy Change"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "AAPU" + "17.7.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Other Policy Change Events' is set to include 'Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Autres A'AAvA'AAnements de modification de stratA'AAgie)|(Other Policy Change Events)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Other Policy Change Events' is set to include 'Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Other Policy Change Events"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "AAPU" + "17.8.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Sensitive Privilege Use' is set to 'Success and Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Utilisation de privilA'AAges sensibles)|(Sensitive Privilege Use)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Sensitive Privilege Use' is set to 'Success and Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Sensitive Privilege Use"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AAS" + "17.9.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit IPsec Driver' is set to 'Success and Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Pilote IPSEC)|(IPsec Driver)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit IPsec Driver' is set to 'Success and Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "IPsec Driver"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "AAS" + "17.9.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Other System Events' is set to 'Success and Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Autres A'AAvA'AAnements systA'AAme)|(Other System Events)"
-$pustoy = $pustoy.line
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Other System Events' is set to 'Success and Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Other System Events"
   
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AAS" + "17.9.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Security State Change' is set to 'Success" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Modification de l'A'AAtat de la sA'AAcuritA'AA)|(Security State Change)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Security State Change' is set to 'Success" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Security State Change"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AAS" + "17.9.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit Security System Extension' is set to 'Success and Failure" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(Extension systA'AAme de sA'AAcuritA'AA)|(Security System Extension)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit Security System Extension' is set to 'Success and Failure" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "Security System Extension"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "AAS" + "17.9.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Audit System Integrity' is set to 'Success and Failure'" + ";"
-$pustoy = Get-Content $auditconfigfile |Select-String -pattern "(IntA'AAgritA'AA du systA'AAme)|(System Integrity)"
-$pustoy = $pustoy.line 
+$outputLine = "$id" + ";" + "(L1)Ensure 'Audit System Integrity' is set to 'Success and Failure'" + ";"
+$policyValue = Get-AuditPolicySummary -Subcategory "System Integrity"
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin Personalization audit<#########" -ForegroundColor DarkGreen
 
 
 
 $id = "PA" + "18.1.1.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prevent enabling lock screen camera' is set to 'Enabled, value must 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prevent enabling lock screen camera' is set to 'Enabled, value must 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"|Select-Object NoLockScreenCamera
- $pustoy = $pustoy.NoLockScreenCamera
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"|Select-Object NoLockScreenCamera
+ $policyValue = $policyValue.NoLockScreenCamera
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "PA" + "18.1.1.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prevent enabling lock screen slide show' is set to 'Enabled', value must 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prevent enabling lock screen slide show' is set to 'Enabled', value must 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"|Select-Object NoLockScreenSlideshow
- $pustoy = $pustoy.NoLockScreenSlideshow
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"|Select-Object NoLockScreenSlideshow
+ $policyValue = $policyValue.NoLockScreenSlideshow
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "PA" + "18.1.2.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow users to enable online speech recognition services' is set to 'Disabled', value must 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow users to enable online speech recognition services' is set to 'Disabled', value must 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\InputPersonalization"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\InputPersonalization"|Select-Object AllowInputPersonalization
- $pustoy = $pustoy.AllowInputPersonalization
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\InputPersonalization"|Select-Object AllowInputPersonalization
+ $policyValue = $policyValue.AllowInputPersonalization
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "PA" + "18.1.3"
-$nulevoy = "$id" + ";" + "(L2)Ensure Allow Online Tips'' is set to 'Disabled', value must 0 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure Allow Online Tips'' is set to 'Disabled', value must 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"|Select-Object AllowOnlineTips
- $pustoy = $pustoy.AllowOnlineTips
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"|Select-Object AllowOnlineTips
+ $policyValue = $policyValue.AllowOnlineTips
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
@@ -3934,21 +3498,19 @@ Write-Host "#########>Begin LAPS audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "LAPS" + "18.3.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure LAPS AdmPwd GPO Extension / CSE is installed, value must true " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure LAPS AdmPwd GPO Extension / CSE is installed, value must true " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\GPExtensions\{D76B9641-3288-4f75-942D-087DE603E3EA}"
 if ( $exist -eq $true) {
- $pustoy = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\GPExtensions\{D76B9641-3288-4f75-942D-087DE603E3EA}"|Select-Object DllName
- $pustoy = $pustoy.DllName
+ $policyValue = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\GPExtensions\{D76B9641-3288-4f75-942D-087DE603E3EA}"|Select-Object DllName
+ $policyValue = $policyValue.DllName
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
@@ -3956,243 +3518,219 @@ Clean-Value($pustoy)
 
 $id = "LAPS" + "18.3.2"
 
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Do not allow password expiration time longer than required by policy' is set to 'Enabled, value must 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Do not allow password expiration time longer than required by policy' is set to 'Enabled, value must 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"|Select-Object PwdExpirationProtectionEnabled
- $pustoy = $pustoy.PwdExpirationProtectionEnabled
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"|Select-Object PwdExpirationProtectionEnabled
+ $policyValue = $policyValue.PwdExpirationProtectionEnabled
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "LAPS" + "18.3.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Enable Local Admin Password Management' is set to 'Enabled', value must 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Enable Local Admin Password Management' is set to 'Enabled', value must 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"|Select-Object AdmPwdEnabled
- $pustoy = $pustoy.AdmPwdEnabled
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"|Select-Object AdmPwdEnabled
+ $policyValue = $policyValue.AdmPwdEnabled
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "LAPS" + "18.3.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Password Settings: Password Complexity' is set to 'Enabled: Large letters + small letters + numbers + special characters, value must 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Password Settings: Password Complexity' is set to 'Enabled: Large letters + small letters + numbers + special characters, value must 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"|Select-Object PasswordComplexity
- $pustoy = $pustoy.PasswordComplexity
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"|Select-Object PasswordComplexity
+ $policyValue = $policyValue.PasswordComplexity
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "LAPS" + "18.3.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Password Settings: Password Length' is set to 'Enabled: 15 or more, value must greater than 15 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Password Settings: Password Length' is set to 'Enabled: 15 or more, value must greater than 15 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"|Select-Object PasswordLength
- $pustoy = $pustoy.PasswordLength
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"|Select-Object PasswordLength
+ $policyValue = $policyValue.PasswordLength
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "LAPS" + "18.3.6"
 
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Password Settings: Password Age (Days)' is set to 'Enabled: 30 or fewer', value must less than 30 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Password Settings: Password Age (Days)' is set to 'Enabled: 30 or fewer', value must less than 30 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"|Select-Object PasswordAgeDays
- $pustoy = $pustoy.PasswordAgeDays
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft Services\AdmPwd"|Select-Object PasswordAgeDays
+ $policyValue = $policyValue.PasswordAgeDays
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin MS Security Guide audit<#########" -ForegroundColor DarkGreen
 
 
 
 $id = "MSSG" + "18.4.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Apply UAC restrictions to local accounts on network logons' is set to 'Enabled', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Apply UAC restrictions to local accounts on network logons' is set to 'Enabled', value must be 0" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object LocalAccountTokenFilterPolicy
- $pustoy = $pustoy.LocalAccountTokenFilterPolicy
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"|Select-Object LocalAccountTokenFilterPolicy
+ $policyValue = $policyValue.LocalAccountTokenFilterPolicy
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "MSSG" + "18.4.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure RPC packet level privacy setting for incoming connections' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure RPC packet level privacy setting for incoming connections' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Print"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Print"|Select-Object RpcAuthnLevelPrivacyEnabled
- $pustoy = $pustoy.RpcAuthnLevelPrivacyEnabled
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Print"|Select-Object RpcAuthnLevelPrivacyEnabled
+ $policyValue = $policyValue.RpcAuthnLevelPrivacyEnabled
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "MSSG" + "18.4.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure SMB v1 client driver' is set to 'Enabled: Disable driver', value must be 4" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure SMB v1 client driver' is set to 'Enabled: Disable driver', value must be 4" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\mrxsmb10"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\mrxsmb10"|Select-Object Start
- $pustoy = $pustoy.Start
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\mrxsmb10"|Select-Object Start
+ $policyValue = $policyValue.Start
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 
 $id = "MSSG" + "18.4.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure Configure SMB v1 server' is set to 'Disabled', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Configure SMB v1 server' is set to 'Disabled', value must be 0" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters"|Select-Object SMB1
- $pustoy = $pustoy.SMB1
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters"|Select-Object SMB1
+ $policyValue = $policyValue.SMB1
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "MSSG" + "18.4.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Enable Structured Exception Handling Overwrite Protection (SEHOP)' is set to 'Enabled', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Enable Structured Exception Handling Overwrite Protection (SEHOP)' is set to 'Enabled', value must be 0" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel"|Select-Object DisableExceptionChainValidation
- $pustoy = $pustoy.DisableExceptionChainValidation
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel"|Select-Object DisableExceptionChainValidation
+ $policyValue = $policyValue.DisableExceptionChainValidation
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "MSSG" + "18.4.6"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'NetBT NodeType configuration' is set to 'Enabled: P-node (recommended), value must be 2" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'NetBT NodeType configuration' is set to 'Enabled: P-node (recommended), value must be 2" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters"|Select-Object NodeType
- $pustoy = $pustoy.NodeType
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters"|Select-Object NodeType
+ $policyValue = $policyValue.NodeType
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 
 $id = "MSSG" + "18.4.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'WDigest Authentication' is set to 'Disabled', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'WDigest Authentication' is set to 'Disabled', value must be 0" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest"|Select-Object UseLogonCredential
- $pustoy = $pustoy.UseLogonCredential
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest"|Select-Object UseLogonCredential
+ $policyValue = $policyValue.UseLogonCredential
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
@@ -4201,238 +3739,212 @@ Write-Host "#########>Begin MSS (Legacy) audit<#########" -ForegroundColor DarkG
 
 
 $id = "MSSL" + "18.5.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'MSS: (AutoAdminLogon) Enable Automatic Logon (not recommended)' is set to 'Disabled, value must be 0 or empty" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'MSS: (AutoAdminLogon) Enable Automatic Logon (not recommended)' is set to 'Disabled, value must be 0 or empty" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"|Select-Object AutoAdminLogon
- $pustoy = $pustoy.AutoAdminLogon
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"|Select-Object AutoAdminLogon
+ $policyValue = $policyValue.AutoAdminLogon
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "MSSL" + "18.5.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'MSS: (DisableIPSourceRouting IPv6) IP source routing protection level (protects against packet spoofing)' is set to 'Enabled: Highest protection, source routing is completely disabled, value must be 2" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'MSS: (DisableIPSourceRouting IPv6) IP source routing protection level (protects against packet spoofing)' is set to 'Enabled: Highest protection, source routing is completely disabled, value must be 2" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters"|Select-Object disableIPSourceRouting
- $pustoy = $pustoy.disableIPSourceRouting
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters"|Select-Object disableIPSourceRouting
+ $policyValue = $policyValue.disableIPSourceRouting
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "MSSL" + "18.5.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'MSS: (DisableIPSourceRouting) IP source routing protection level (protects against packet spoofing)' is set to 'Enabled: Highest protection, source routing is completely disabled, value must be 2" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'MSS: (DisableIPSourceRouting) IP source routing protection level (protects against packet spoofing)' is set to 'Enabled: Highest protection, source routing is completely disabled, value must be 2" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"|Select-Object disableIPSourceRouting
- $pustoy = $pustoy.disableIPSourceRouting
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"|Select-Object disableIPSourceRouting
+ $policyValue = $policyValue.disableIPSourceRouting
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "MSSL" + "18.5.4"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'MSS: (DisableSavePassword) Prevent the dial-up password from being saved' is set to 'Enabled', source routing is completely disabled, value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'MSS: (DisableSavePassword) Prevent the dial-up password from being saved' is set to 'Enabled', source routing is completely disabled, value must be 1" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\RasMan\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\RasMan\Parameters"|Select-Object DisableSavePassword
- $pustoy = $pustoy.DisableSavePassword
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\RasMan\Parameters"|Select-Object DisableSavePassword
+ $policyValue = $policyValue.DisableSavePassword
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "MSSL" + "18.5.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'MSS: (EnableICMPRedirect) Allow ICMP redirects to override OSPF generated routes' is set to 'Disabled, value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'MSS: (EnableICMPRedirect) Allow ICMP redirects to override OSPF generated routes' is set to 'Disabled, value must be 0" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"|Select-Object EnableICMPRedirect
- $pustoy = $pustoy.EnableICMPRedirect
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"|Select-Object EnableICMPRedirect
+ $policyValue = $policyValue.EnableICMPRedirect
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "MSSL" + "18.5.6"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'MSS: (KeepAliveTime) How often keep-alive packets are sent in milliseconds' is set to 'Enabled: 300,000 or 5 minutes, value must be 300000" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'MSS: (KeepAliveTime) How often keep-alive packets are sent in milliseconds' is set to 'Enabled: 300,000 or 5 minutes, value must be 300000" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"|Select-Object KeepAliveTime
- $pustoy = $pustoy.KeepAliveTime
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"|Select-Object KeepAliveTime
+ $policyValue = $policyValue.KeepAliveTime
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "MSSL" + "18.5.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'MSS: (NoNameReleaseOnDemand) Allow the computer to ignore NetBIOS name release requests except from WINS servers' is set to 'Enabled, value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'MSS: (NoNameReleaseOnDemand) Allow the computer to ignore NetBIOS name release requests except from WINS servers' is set to 'Enabled, value must be 1" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters" |Select-Object NoNameReleaseOnDemand
- $pustoy = $pustoy.NoNameReleaseOnDemand
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters" |Select-Object NoNameReleaseOnDemand
+ $policyValue = $policyValue.NoNameReleaseOnDemand
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "MSSL" + "18.5.8"
-$nulevoy = "$id" + ";" + "(L2)Ensure MSS: (PerformRouterDiscovery) Allow IRDP to detect and configure Default Gateway addresses (could lead to DoS)', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure MSS: (PerformRouterDiscovery) Allow IRDP to detect and configure Default Gateway addresses (could lead to DoS)', value must be 0" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" |Select-Object PerformRouterDiscovery
- $pustoy = $pustoy.PerformRouterDiscovery
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" |Select-Object PerformRouterDiscovery
+ $policyValue = $policyValue.PerformRouterDiscovery
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "MSSL" + "18.5.9"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'MSS: (SafeDllSearchMode) Enable Safe DLL search mode (recommended)' is set to 'Enabled, value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'MSS: (SafeDllSearchMode) Enable Safe DLL search mode (recommended)' is set to 'Enabled, value must be 1" + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager"
 if ( $exist -eq $true) {
-				$pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" |Select-Object SafeDllSearchMode
- $pustoy = $pustoy.SafeDllSearchMode
+				$policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" |Select-Object SafeDllSearchMode
+ $policyValue = $policyValue.SafeDllSearchMode
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "MSSL" + "18.5.10"
-$nulevoy = "$id" + ";" + "(L1)Ensure MSS: (ScreenSaverGracePeriod) The time in seconds before the screen saver grace period expires 'is set to 'Enabled: 5 or fewer seconds (0 recommended)', value must be 5 or less " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure MSS: (ScreenSaverGracePeriod) The time in seconds before the screen saver grace period expires 'is set to 'Enabled: 5 or fewer seconds (0 recommended)', value must be 5 or less " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" |Select-Object ScreenSaverGracePeriod
- $pustoy = $pustoy.ScreenSaverGracePeriod
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" |Select-Object ScreenSaverGracePeriod
+ $policyValue = $policyValue.ScreenSaverGracePeriod
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "MSSL" + "18.5.11"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'MSS: (TcpMaxDataRetransmissions IPv6) How many times unacknowledged data is retransmitted' is set to 'Enabled: 3: value must be 3 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'MSS: (TcpMaxDataRetransmissions IPv6) How many times unacknowledged data is retransmitted' is set to 'Enabled: 3: value must be 3 " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters" |Select-Object tcpMaxDataRetransmissions
- $pustoy = $pustoy.tcpMaxDataRetransmissions
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters" |Select-Object tcpMaxDataRetransmissions
+ $policyValue = $policyValue.tcpMaxDataRetransmissions
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "MSSL" + "18.5.12"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'MSS: (TcpMaxDataRetransmissions) How many times unacknowledged data is retransmitted' is set to 'Enabled: 3: value must be 3 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'MSS: (TcpMaxDataRetransmissions) How many times unacknowledged data is retransmitted' is set to 'Enabled: 3: value must be 3 " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP\Parameters" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP\Parameters" |Select-Object tcpMaxDataRetransmissions
- $pustoy = $pustoy.tcpMaxDataRetransmissions
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP\Parameters" |Select-Object tcpMaxDataRetransmissions
+ $policyValue = $policyValue.tcpMaxDataRetransmissions
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "MSSL" + "18.5.13"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'MSS: (WarningLevel) Percentage threshold for the security event log at which the system will generate a warning' is set to 'Enabled: 90% or less " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'MSS: (WarningLevel) Percentage threshold for the security event log at which the system will generate a warning' is set to 'Enabled: 90% or less " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\Eventlog\Security"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Eventlog\Security" |Select-Object WarningLevel
- $pustoy = $pustoy.WarningLevel
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Eventlog\Security" |Select-Object WarningLevel
+ $policyValue = $policyValue.WarningLevel
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 Write-Host "#########>Begin DNS Client audit<#########" -ForegroundColor DarkGreen
@@ -4441,81 +3953,73 @@ Write-Host "#########>Begin DNS Client audit<#########" -ForegroundColor DarkGre
 
 
 $id = "DNSCA" + "18.6.4.1"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Configure DNS over HTTPS (DoH) name resolution' is set to 'Enabled: Allow DoH' or higher, value must be 2 OR 3 could cause issue in domain joined environment " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Configure DNS over HTTPS (DoH) name resolution' is set to 'Enabled: Allow DoH' or higher, value must be 2 OR 3 could cause issue in domain joined environment " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" |Select-Object DoHPolicy
- $pustoy = $pustoy.DoHPolicy
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" |Select-Object DoHPolicy
+ $policyValue = $policyValue.DoHPolicy
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 
 $id = "DNSCA" + "18.6.4.2"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Configure NetBIOS settings' is set to 'Enabled: Disable NetBIOS name resolution on public networks, value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Configure NetBIOS settings' is set to 'Enabled: Disable NetBIOS name resolution on public networks, value must be 0" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" |Select-Object EnableNetbios
- $pustoy = $pustoy.EnableNetbios
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" |Select-Object EnableNetbios
+ $policyValue = $policyValue.EnableNetbios
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 
 $id = "DNSCA" + "18.6.4.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn off multicast name resolution' is set to 'Enabled' (MS Only), value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn off multicast name resolution' is set to 'Enabled' (MS Only), value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" |Select-Object EnableMulticast
- $pustoy = $pustoy.EnableMulticast
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" |Select-Object EnableMulticast
+ $policyValue = $policyValue.EnableMulticast
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin Fonts audit<#########" -ForegroundColor DarkGreen
 
 
 
 $id = "FONT" + "18.6.5.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Enable Font Providers' is set to 'Disabled, value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Enable Font Providers' is set to 'Disabled, value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object EnableFontProviders
- $pustoy = $pustoy.EnableFontProviders
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object EnableFontProviders
+ $policyValue = $policyValue.EnableFontProviders
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 Write-Host "#########>Begin Lanman Workstation audit<#########" -ForegroundColor DarkGreen
@@ -4523,80 +4027,74 @@ Write-Host "#########>Begin Lanman Workstation audit<#########" -ForegroundColor
 
 
 $id = "LW" + "18.6.8.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Enable insecure guest logons' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Enable insecure guest logons' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LanmanWorkstation"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LanmanWorkstation" |Select-Object AllowInsecureGuestAuth
- $pustoy = $pustoy.AllowInsecureGuestAuth
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LanmanWorkstation" |Select-Object AllowInsecureGuestAuth
+ $policyValue = $policyValue.AllowInsecureGuestAuth
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 Write-Host "#########>Begin Link-Layer Topology Discovery audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "LLTDIO" + "18.6.9.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Turn on Mapper I/O (LLTDIO) driver' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Turn on Mapper I/O (LLTDIO) driver' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object AllowLLTDIOOnDomain
- $pustoy = $pustoy.AllowLLTDIOOnDomain
- $pustoytemp = "AllowLLTDIOOnDomain" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object AllowLLTDIOOnPublicNet
- $pustoy = $pustoy.AllowLLTDIOOnPublicNet
- $pustoytemp += "AllowLLTDIOOnPublicNet" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object EnableLLTDIO
- $pustoy = $pustoy.EnableLLTDIO
- $pustoytemp += "EnableLLTDIO" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object ProhibitLLTDIOOnPrivateNet
- $pustoy = $pustoy.ProhibitLLTDIOOnPrivateNet
- $pustoytemp += "ProhibitLLTDIOOnPrivateNet" + ":" + "$pustoy" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object AllowLLTDIOOnDomain
+ $policyValue = $policyValue.AllowLLTDIOOnDomain
+ $policyValueBuffer = "AllowLLTDIOOnDomain" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object AllowLLTDIOOnPublicNet
+ $policyValue = $policyValue.AllowLLTDIOOnPublicNet
+ $policyValueBuffer += "AllowLLTDIOOnPublicNet" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object EnableLLTDIO
+ $policyValue = $policyValue.EnableLLTDIO
+ $policyValueBuffer += "EnableLLTDIO" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object ProhibitLLTDIOOnPrivateNet
+ $policyValue = $policyValue.ProhibitLLTDIOOnPrivateNet
+ $policyValueBuffer += "ProhibitLLTDIOOnPrivateNet" + ":" + "$policyValue" + "|"
 }
 else {
- $pustoytemp = "no configuration"
+ $policyValueBuffer = "no configuration"
 }
 
-$nulevoy += $pustoytemp
-$nulevoy>> $fname
+$outputLine += $policyValueBuffer
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "LLTDIO" + "18.6.9.2"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Turn on Responder (RSPNDR) driver' is set to 'Disabled'', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Turn on Responder (RSPNDR) driver' is set to 'Disabled'', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object AllowRspndrOnDomain
- $pustoy = $pustoy.AllowRspndrOnDomain
- $pustoytemp = "AllowRspndrOnDomain" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object AllowRspndrOnPublicNet
- $pustoy = $pustoy.AllowRspndrOnPublicNet
- $pustoytemp += "AllowRspndrOnPublicNet" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object EnableRspndr
- $pustoy = $pustoy.EnableRspndr
- $pustoytemp += "EnableRspndr" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object ProhibitRspndrOnPrivateNet
- $pustoy = $pustoy.ProhibitRspndrOnPrivateNet
- $pustoytemp += "ProhibitRspndrOnPrivateNet" + ":" + "$pustoy" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object AllowRspndrOnDomain
+ $policyValue = $policyValue.AllowRspndrOnDomain
+ $policyValueBuffer = "AllowRspndrOnDomain" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object AllowRspndrOnPublicNet
+ $policyValue = $policyValue.AllowRspndrOnPublicNet
+ $policyValueBuffer += "AllowRspndrOnPublicNet" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object EnableRspndr
+ $policyValue = $policyValue.EnableRspndr
+ $policyValueBuffer += "EnableRspndr" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LLTD" |Select-Object ProhibitRspndrOnPrivateNet
+ $policyValue = $policyValue.ProhibitRspndrOnPrivateNet
+ $policyValueBuffer += "ProhibitRspndrOnPrivateNet" + ":" + "$policyValue" + "|"
 }
 else {
- $pustoytemp = "no configuration"
+ $policyValueBuffer = "no configuration"
 }
 
-$nulevoy += $pustoytemp
-$nulevoy>> $fname
+$outputLine += $policyValueBuffer
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 Write-Host "#########>Begin Microsoft Peer-to-Peer Networking Service saudit<#########" -ForegroundColor DarkGreen
@@ -4605,204 +4103,184 @@ Write-Host "#########>Begin Microsoft Peer-to-Peer Networking Service saudit<###
 
 $id = "PPNS" + "18.6.10.2"
 
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Turn off Microsoft Peer-to-Peer Networking Services' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Turn off Microsoft Peer-to-Peer Networking Services' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Peernet" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Peernet" |Select-Object Disabled
- $pustoy = $pustoy.Disabled
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Peernet" |Select-Object Disabled
+ $policyValue = $policyValue.Disabled
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 Write-Host "#########>Begin Network Connections audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "NC" + "18.6.11.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prohibit installation and configuration of Network Bridge on your DNS domain network' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prohibit installation and configuration of Network Bridge on your DNS domain network' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Network Connections" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Network Connections" |Select-Object NC_AllowNetBridge_NLA
- $pustoy = $pustoy.NC_AllowNetBridge_NLA
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Network Connections" |Select-Object NC_AllowNetBridge_NLA
+ $policyValue = $policyValue.NC_AllowNetBridge_NLA
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "NC" + "18.6.11.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prohibit use of Internet Connection Sharing on your DNS domain network' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prohibit use of Internet Connection Sharing on your DNS domain network' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Network Connections"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Network Connections" |Select-Object NC_ShowSharedAccessUI
- $pustoy = $pustoy.NC_ShowSharedAccessUI
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Network Connections" |Select-Object NC_ShowSharedAccessUI
+ $policyValue = $policyValue.NC_ShowSharedAccessUI
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "NC" + "18.6.11.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Require domain users to elevate when setting a network's location' is set to 'Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Require domain users to elevate when setting a network's location' is set to 'Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Network Connections"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Network Connections" |Select-Object NC_StdDomainUserSetLocation
- $pustoy = $pustoy.NC_StdDomainUserSetLocation
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Network Connections" |Select-Object NC_StdDomainUserSetLocation
+ $policyValue = $policyValue.NC_StdDomainUserSetLocation
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "NP" + "18.6.14.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Hardened UNC Paths' is set to 'Enabled, with Require Mutual Authentication and Require Integrity set for all NETLOGON and SYSVOL shares', RequireMutualAuthentication=1, RequireIntegrity=1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Hardened UNC Paths' is set to 'Enabled, with Require Mutual Authentication and Require Integrity set for all NETLOGON and SYSVOL shares', RequireMutualAuthentication=1, RequireIntegrity=1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\NetworkProvider"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\NetworkProvider" |Select-Object "\\*\NETLOGON"
- $pustoy = $pustoy."\\*\NETLOGON"
- $pustoytemp = "\\*\NETLOGON" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\NetworkProvider" |Select-Object "\\*\SYSVOL"
- $pustoy = $pustoy."\\*\SYSVOL"
- $pustoytemp = "\\*\SYSVOL" + ":" + "$pustoy" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\NetworkProvider" |Select-Object "\\*\NETLOGON"
+ $policyValue = $policyValue."\\*\NETLOGON"
+ $policyValueBuffer = "\\*\NETLOGON" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\NetworkProvider" |Select-Object "\\*\SYSVOL"
+ $policyValue = $policyValue."\\*\SYSVOL"
+ $policyValueBuffer = "\\*\SYSVOL" + ":" + "$policyValue" + "|"
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoytemp
-$nulevoy>> $fname
+$outputLine += $policyValueBuffer
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "IPV6" + "18.6.19.2.1"
 
-$nulevoy = "$id" + ";" + "(L2)Disable IPv6 (Ensure TCPIP6 Parameter 'DisabledComponents' is set to '0xff (255)'), value must be 255 " + ";"
+$outputLine = "$id" + ";" + "(L2)Disable IPv6 (Ensure TCPIP6 Parameter 'DisabledComponents' is set to '0xff (255)'), value must be 255 " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters" |Select-Object disabledComponents
- $pustoy = $pustoy.disabledComponents
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters" |Select-Object disabledComponents
+ $policyValue = $policyValue.disabledComponents
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 
 $id = "WCN" + "18.6.20.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Configuration of wireless settings using Windows Connect Now' is set to 'Disabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Configuration of wireless settings using Windows Connect Now' is set to 'Disabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\Registrars"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\Registrars" |Select-Object EnableRegistrars
- $pustoy = $pustoy.EnableRegistrars
- $pustoytemp = "EnableRegistrars" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\Registrars" |Select-Object DisableUPnPRegistrar
- $pustoy = $pustoy.DisableUPnPRegistrar
- $pustoytemp += "DisableUPnPRegistrar" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\Registrars" |Select-Object disableInBand802DOT11Registrar
- $pustoy = $pustoy.disableInBand802DOT11Registrar
- $pustoytemp += "disableInBand802DOT11Registrar" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\Registrars" |Select-Object DisableFlashConfigRegistrar
- $pustoy = $pustoy.DisableFlashConfigRegistrar
- $pustoytemp += "DisableFlashConfigRegistrar" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\Registrars" |Select-Object DisableWPDRegistrar
- $pustoy = $pustoy.DisableWPDRegistrar
- $pustoytemp += "DisableWPDRegistrar" + ":" + "$pustoy" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\Registrars" |Select-Object EnableRegistrars
+ $policyValue = $policyValue.EnableRegistrars
+ $policyValueBuffer = "EnableRegistrars" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\Registrars" |Select-Object DisableUPnPRegistrar
+ $policyValue = $policyValue.DisableUPnPRegistrar
+ $policyValueBuffer += "DisableUPnPRegistrar" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\Registrars" |Select-Object disableInBand802DOT11Registrar
+ $policyValue = $policyValue.disableInBand802DOT11Registrar
+ $policyValueBuffer += "disableInBand802DOT11Registrar" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\Registrars" |Select-Object DisableFlashConfigRegistrar
+ $policyValue = $policyValue.DisableFlashConfigRegistrar
+ $policyValueBuffer += "DisableFlashConfigRegistrar" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\Registrars" |Select-Object DisableWPDRegistrar
+ $policyValue = $policyValue.DisableWPDRegistrar
+ $policyValueBuffer += "DisableWPDRegistrar" + ":" + "$policyValue" + "|"
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoytemp
-$nulevoy>> $fname
+$outputLine += $policyValueBuffer
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "WCN" + "18.6.20.2"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Prohibit access of the Windows Connect Now wizards' is set to 'Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Prohibit access of the Windows Connect Now wizards' is set to 'Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\UI"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\UI" |Select-Object DisableWcnUi
- $pustoy = $pustoy.DisableWcnUi
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WCN\UI" |Select-Object DisableWcnUi
+ $policyValue = $policyValue.DisableWcnUi
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "WCM" + "18.6.21.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure Minimize the number of simultaneous connections to the Internet or a Windows Domain' is set to 'Enabled: 3 = Prevent Wi-Fi when on Ethernet', value must be 3 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Minimize the number of simultaneous connections to the Internet or a Windows Domain' is set to 'Enabled: 3 = Prevent Wi-Fi when on Ethernet', value must be 3 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WcmSvc\GroupPolicy"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WcmSvc\GroupPolicy" |Select-Object fMinimizeConnections
- $pustoy = $pustoy.fMinimizeConnections
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WcmSvc\GroupPolicy" |Select-Object fMinimizeConnections
+ $policyValue = $policyValue.fMinimizeConnections
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "WCM" + "18.6.21.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prohibit connection to non-domain networks when connected to domain authenticated network' is set to 'Enabled'', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prohibit connection to non-domain networks when connected to domain authenticated network' is set to 'Enabled'', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WcmSvc\GroupPolicy"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WcmSvc\GroupPolicy" |Select-Object fBlockNonDomain
- $pustoy = $pustoy.fBlockNonDomain
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WcmSvc\GroupPolicy" |Select-Object fBlockNonDomain
+ $policyValue = $policyValue.fBlockNonDomain
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
@@ -4810,20 +4288,18 @@ Clean-Value($pustoy)
 Write-Host "#########>Begin WLAN Settings audit<#########" -ForegroundColor DarkGreen
 
 $id = "WLAN" + "18.6.23.2.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow Windows to automatically connect to suggested open hotspots, to networks shared by contacts, and to hotspots offering paid services' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow Windows to automatically connect to suggested open hotspots, to networks shared by contacts, and to hotspots offering paid services' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\WcmSvc\wifinetworkmanager\config"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\WcmSvc\wifinetworkmanager\config" |Select-Object AutoConnectAllowedOEM
- $pustoy = $pustoy.AutoConnectAllowedOEM
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\WcmSvc\wifinetworkmanager\config" |Select-Object AutoConnectAllowedOEM
+ $policyValue = $policyValue.AutoConnectAllowedOEM
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -4831,217 +4307,193 @@ Clean-Value($pustoy)
 Write-Host "#########>Begin Printer Settings audit<#########" -ForegroundColor DarkGreen
 
 $id = "PRINT" + "18.7.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow Print Spooler to accept client connections' is set to 'Disabled'', value must be 2 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow Print Spooler to accept client connections' is set to 'Disabled'', value must be 2 " + ";"
 $exist = Test-Path "HKLM:\Software\Policies\Microsoft\Windows NT\Printers"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers" |Select-Object RegisterSpoolerRemoteRpcEndPoint
- $pustoy = $pustoy.RegisterSpoolerRemoteRpcEndPoint
+ $policyValue = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers" |Select-Object RegisterSpoolerRemoteRpcEndPoint
+ $policyValue = $policyValue.RegisterSpoolerRemoteRpcEndPoint
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "PRINT" + "18.7.2"
-$nulevoy = "$id" + ";" + "Ensure 'Configure Redirection Guard' is set to 'Enabled: Redirection Guard Enabled', value must be 1 , 2 mean audit mode " + ";"
+$outputLine = "$id" + ";" + "Ensure 'Configure Redirection Guard' is set to 'Enabled: Redirection Guard Enabled', value must be 1 , 2 mean audit mode " + ";"
 $exist = Test-Path "HKLM:\Software\Policies\Microsoft\Windows NT\Printers"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers" |Select-Object RedirectionguardPolicy
- $pustoy = $pustoy.RedirectionguardPolicy
+ $policyValue = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers" |Select-Object RedirectionguardPolicy
+ $policyValue = $policyValue.RedirectionguardPolicy
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "PRINT" + "18.7.3"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Configure RPC connection settings: Protocol to use for outgoing RPC connections' is set to 'Enabled: RPC over TCP', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Configure RPC connection settings: Protocol to use for outgoing RPC connections' is set to 'Enabled: RPC over TCP', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\RPC"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\RPC" |Select-Object RpcUseNamedPipeProtocol
- $pustoy = $pustoy.RpcUseNamedPipeProtocol
+ $policyValue = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\RPC" |Select-Object RpcUseNamedPipeProtocol
+ $policyValue = $policyValue.RpcUseNamedPipeProtocol
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "PRINT" + "18.7.4"
-$nulevoy = "$id" + ";" + "(L1) (L1) Ensure 'Configure RPC connection settings: Use authentication for outgoing RPC connections' is set to 'Enabled: Default', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1) (L1) Ensure 'Configure RPC connection settings: Use authentication for outgoing RPC connections' is set to 'Enabled: Default', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\RPC"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\RPC" |Select-Object RpcAuthentication
- $pustoy = $pustoy.RpcAuthentication
+ $policyValue = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\RPC" |Select-Object RpcAuthentication
+ $policyValue = $policyValue.RpcAuthentication
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "PRINT" + "18.7.5"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Configure RPC listener settings: Protocols to allow for incoming RPC connections' is set to 'Enabled: RPC over TCP', value must be 0x7 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Configure RPC listener settings: Protocols to allow for incoming RPC connections' is set to 'Enabled: RPC over TCP', value must be 0x7 " + ";"
 $exist = Test-Path "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\RPC"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\RPC" |Select-Object RpcProtocols
- $pustoy = $pustoy.RpcProtocols
+ $policyValue = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\RPC" |Select-Object RpcProtocols
+ $policyValue = $policyValue.RpcProtocols
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "PRINT" + "18.7.7"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Configure RPC over TCP port' is set to 'Enabled: 0' (Automated) value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Configure RPC over TCP port' is set to 'Enabled: 0' (Automated) value must be 0 " + ";"
 $exist = Test-Path "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\RPC"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\RPC" |Select-Object RpcTcpPort
- $pustoy = $pustoy.RpcTcpPort
+ $policyValue = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\RPC" |Select-Object RpcTcpPort
+ $policyValue = $policyValue.RpcTcpPort
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "PRINT" + "18.7.8"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Configure RPC over TCP port' is set to 'Enabled: 0' (Automated) value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Configure RPC over TCP port' is set to 'Enabled: 0' (Automated) value must be 1 " + ";"
 $exist = Test-Path "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint" |Select-Object RestrictDriverInstallationToAdministrators
- $pustoy = $pustoy.RestrictDriverInstallationToAdministrators
+ $policyValue = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint" |Select-Object RestrictDriverInstallationToAdministrators
+ $policyValue = $policyValue.RestrictDriverInstallationToAdministrators
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "PRINT" + "18.7.9"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Manage processing of Queue-specific files' is set to 'Enabled: Limit Queue-specific files to Color profiles' value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Manage processing of Queue-specific files' is set to 'Enabled: Limit Queue-specific files to Color profiles' value must be 1 " + ";"
 $exist = Test-Path "HKLM:\Software\Policies\Microsoft\Windows NT\Printers"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers" |Select-Object CopyFilesPolicy
- $pustoy = $pustoy.CopyFilesPolicy
+ $policyValue = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers" |Select-Object CopyFilesPolicy
+ $policyValue = $policyValue.CopyFilesPolicy
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "PRINT" + "18.7.10"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Point and Print Restrictions: When installing drivers for a new connection' is set to 'Enabled: Show warning and elevation prompt',value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Point and Print Restrictions: When installing drivers for a new connection' is set to 'Enabled: Show warning and elevation prompt',value must be 1 " + ";"
 $exist = Test-Path "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint" |Select-Object NoWarningNoElevationOnInstall
- $pustoy = $pustoy.NoWarningNoElevationOnInstall
+ $policyValue = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint" |Select-Object NoWarningNoElevationOnInstall
+ $policyValue = $policyValue.NoWarningNoElevationOnInstall
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "PRINT" + "18.7.11"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Point and Print Restrictions: When updating drivers for an existing connection' is set to 'Enabled: Show warning and elevation prompt',value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Point and Print Restrictions: When updating drivers for an existing connection' is set to 'Enabled: Show warning and elevation prompt',value must be 0 " + ";"
 $exist = Test-Path "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint" |Select-Object UpdatePromptSettings
- $pustoy = $pustoy.UpdatePromptSettings
+ $policyValue = Get-ItemProperty "HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint" |Select-Object UpdatePromptSettings
+ $policyValue = $policyValue.UpdatePromptSettings
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Notification Settings audit<#########" -ForegroundColor DarkGreen
 
 $id = "NOTI" + "18.8.1.1"
-$nulevoy = "$id" + ";" + "(L2) Ensure 'Turn off notifications network usage' is set to 'Enabled',value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2) Ensure 'Turn off notifications network usage' is set to 'Enabled',value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PushNotifications"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PushNotifications" |Select-Object NoCloudApplicationNotification
- $pustoy = $pustoy.NoCloudApplicationNotification
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PushNotifications" |Select-Object NoCloudApplicationNotification
+ $policyValue = $policyValue.NoCloudApplicationNotification
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 Write-Host "#########>Begin Audit Process Creation audit<#########" -ForegroundColor DarkGreen
 $id = "APC" + "18.9.3.1"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Include command line in process creation events' is set to 'Enabled',value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Include command line in process creation events' is set to 'Enabled',value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit" |Select-Object ProcessCreationIncludeCmdLine_Enabled
- $pustoy = $pustoy.ProcessCreationIncludeCmdLine_Enabled
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit" |Select-Object ProcessCreationIncludeCmdLine_Enabled
+ $policyValue = $policyValue.ProcessCreationIncludeCmdLine_Enabled
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -5054,39 +4506,35 @@ Write-Host "#########>Begin Credential Delegation audit<#########" -ForegroundCo
 
 
 $id = "CD" + "18.9.4.1"
-$nulevoy = "$indextest" + ";" + "(L1) Ensure 'Encryption Oracle Remediation' is set to 'Enabled: Force Updated Clients', value must be 0 " + ";"
+$outputLine = "$indextest" + ";" + "(L1) Ensure 'Encryption Oracle Remediation' is set to 'Enabled: Force Updated Clients', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\CredSSP\Parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\CredSSP\Parameters" |Select-Object AllowEncryptionOracle
- $pustoy = $pustoy.AllowEncryptionOracle
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\CredSSP\Parameters" |Select-Object AllowEncryptionOracle
+ $policyValue = $policyValue.AllowEncryptionOracle
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "CD" + "$indextest"
-$nulevoy = "$indextest" + ";" + "(L1) Ensure 'Remote host allows delegation of non-exportable credentials' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$indextest" + ";" + "(L1) Ensure 'Remote host allows delegation of non-exportable credentials' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CredentialsDelegation"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CredentialsDelegation" |Select-Object AllowProtectedCreds
- $pustoy = $pustoy.AllowProtectedCreds
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CredentialsDelegation" |Select-Object AllowProtectedCreds
+ $policyValue = $policyValue.AllowProtectedCreds
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
@@ -5094,277 +4542,249 @@ Write-Host "#########>Begin Device Guard audit<#########" -ForegroundColor DarkG
 
 
 $id = "DG" + "18.9.5.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn On Virtualization Based Security' is set to 'Enabled' (Scored), value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn On Virtualization Based Security' is set to 'Enabled' (Scored), value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" |Select-Object EnableVirtualizationBasedSecurity
- $pustoy = $pustoy.EnableVirtualizationBasedSecurity
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" |Select-Object EnableVirtualizationBasedSecurity
+ $policyValue = $policyValue.EnableVirtualizationBasedSecurity
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "DG" + "18.9.5.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn On Virtualization Based Security: Select Platform Security Level' is set to 'Secure Boot and DMA Protection', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn On Virtualization Based Security: Select Platform Security Level' is set to 'Secure Boot and DMA Protection', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" |Select-Object RequirePlatformSecurityFeatures
- $pustoy = $pustoy.RequirePlatformSecurityFeatures
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" |Select-Object RequirePlatformSecurityFeatures
+ $policyValue = $policyValue.RequirePlatformSecurityFeatures
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "DG" + "18.9.5.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn On Virtualization Based Security: Virtualization Based Protection of Code Integrity' is set to 'Enabled with UEFI lock' (Scored), value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn On Virtualization Based Security: Virtualization Based Protection of Code Integrity' is set to 'Enabled with UEFI lock' (Scored), value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" |Select-Object HypervisorEnforcedCodeIntegrity
- $pustoy = $pustoy.HypervisorEnforcedCodeIntegrity
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" |Select-Object HypervisorEnforcedCodeIntegrity
+ $policyValue = $policyValue.HypervisorEnforcedCodeIntegrity
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "DG" + "18.9.5.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn On Virtualization Based Security: Require UEFI Memory Attributes Table' is set to 'True (checked)', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn On Virtualization Based Security: Require UEFI Memory Attributes Table' is set to 'True (checked)', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" |Select-Object HVCIMATRequired
- $pustoy = $pustoy.HVCIMATRequired
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" |Select-Object HVCIMATRequired
+ $policyValue = $policyValue.HVCIMATRequired
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "DG" + "18.9.5.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn On Virtualization Based Security: Credential Guard Configuration' is set to 'Enabled with UEFI lock', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn On Virtualization Based Security: Credential Guard Configuration' is set to 'Enabled with UEFI lock', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" |Select-Object LsaCfgFlags
- $pustoy = $pustoy.LsaCfgFlags
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" |Select-Object LsaCfgFlags
+ $policyValue = $policyValue.LsaCfgFlags
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "DG" + "18.9.5.6"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn On Virtualization Based Security: Credential Guard Configuration' is set to 'Enabled with UEFI lock', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn On Virtualization Based Security: Credential Guard Configuration' is set to 'Enabled with UEFI lock', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" |Select-Object ConfigureSystemGuardLaunch
- $pustoy = $pustoy.ConfigureSystemGuardLaunch
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" |Select-Object ConfigureSystemGuardLaunch
+ $policyValue = $policyValue.ConfigureSystemGuardLaunch
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "DG" + "18.9.5.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn On Virtualization Based Security: Kernel-mode Hardware-enforced Stack Protection' is set to 'Enabled: Enabled in enforcement mode', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn On Virtualization Based Security: Kernel-mode Hardware-enforced Stack Protection' is set to 'Enabled: Enabled in enforcement mode', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" |Select-Object ConfigureKernelShadowStacksLaunch
- $pustoy = $pustoy.ConfigureKernelShadowStacksLaunch
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" |Select-Object ConfigureKernelShadowStacksLaunch
+ $policyValue = $policyValue.ConfigureKernelShadowStacksLaunch
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 Write-Host "#########>Begin Device Installation Restrictions audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "DIR" + "18.9.7.1.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prevent installation of devices that match any of these device IDs' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prevent installation of devices that match any of these device IDs' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions" |Select-Object DenyDeviceIDs
- $pustoy = $pustoy.DenyDeviceIDs
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions" |Select-Object DenyDeviceIDs
+ $policyValue = $policyValue.DenyDeviceIDs
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "DIR" + "18.9.7.1.2"
-$nulevoy = "$id" + ";" + "Ensure 'Prevent installation of devices that match any of these device IDs' is set to 'Enabled', value must be PCI\CC_0C0A " + ";"
+$outputLine = "$id" + ";" + "Ensure 'Prevent installation of devices that match any of these device IDs' is set to 'Enabled', value must be PCI\CC_0C0A " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions\DenyDeviceIDs"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions\DenyDeviceIDs" |Select-Object 1
- $pustoy = $pustoy.1
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions\DenyDeviceIDs" |Select-Object 1
+ $policyValue = $policyValue.1
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "DIR" + "18.9.7.1.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prevent installation of devices that match any of these device IDs' is set to 'Enabled', value must be PCI\CC_0C0A " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prevent installation of devices that match any of these device IDs' is set to 'Enabled', value must be PCI\CC_0C0A " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions" |Select-Object DenyDeviceIDsRetroactive
- $pustoy = $pustoy.DenyDeviceIDsRetroactive
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions" |Select-Object DenyDeviceIDsRetroactive
+ $policyValue = $policyValue.DenyDeviceIDsRetroactive
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "DIR" + "18.9.7.1.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prevent installation of devices using drivers that match these device setup classes' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prevent installation of devices using drivers that match these device setup classes' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions" |Select-Object DenyDeviceClasses
- $pustoy = $pustoy.DenyDeviceClasses
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions" |Select-Object DenyDeviceClasses
+ $policyValue = $policyValue.DenyDeviceClasses
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "DIR" + "18.9.7.1.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prevent installation of devices using drivers that match these device setup classes: Prevent installation of devices using drivers for these device setup' is set to 'IEEE 1394 device setup classes, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prevent installation of devices using drivers that match these device setup classes: Prevent installation of devices using drivers for these device setup' is set to 'IEEE 1394 device setup classes, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions\DenyDeviceClasses"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions\DenyDeviceClasses" |Select-Object "{d48179be-ec20-11d1-b6b8-00c04fa372a7}"
- $pustoy = $pustoy."{d48179be-ec20-11d1-b6b8-00c04fa372a7}"
- $pustoytemp = "{d48179be-ec20-11d1-b6b8-00c04fa372a7}" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions\DenyDeviceClasses" |Select-Object "{7ebefbc0-3200-11d2-b4c2-00a0C9697d07}"
- $pustoy = $pustoy."{7ebefbc0-3200-11d2-b4c2-00a0C9697d07}"
- $pustoytemp += "{7ebefbc0-3200-11d2-b4c2-00a0C9697d07}" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions\DenyDeviceClasses" |Select-Object "{c06ff265-ae09-48f0-812c-16753d7cba83}"
- $pustoy = $pustoy."{c06ff265-ae09-48f0-812c-16753d7cba83}"
- $pustoytemp += "{c06ff265-ae09-48f0-812c-16753d7cba83}" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions\DenyDeviceClasses" |Select-Object "{6bdd1fc1-810f-11d0-bec7-08002be2092f}"
- $pustoy = $pustoy."{6bdd1fc1-810f-11d0-bec7-08002be2092f}"
- $pustoytemp += "{6bdd1fc1-810f-11d0-bec7-08002be2092f}" + ":" + "$pustoy" + "|"
- $pustoy = $pustoytemp 
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions\DenyDeviceClasses" |Select-Object "{d48179be-ec20-11d1-b6b8-00c04fa372a7}"
+ $policyValue = $policyValue."{d48179be-ec20-11d1-b6b8-00c04fa372a7}"
+ $policyValueBuffer = "{d48179be-ec20-11d1-b6b8-00c04fa372a7}" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions\DenyDeviceClasses" |Select-Object "{7ebefbc0-3200-11d2-b4c2-00a0C9697d07}"
+ $policyValue = $policyValue."{7ebefbc0-3200-11d2-b4c2-00a0C9697d07}"
+ $policyValueBuffer += "{7ebefbc0-3200-11d2-b4c2-00a0C9697d07}" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions\DenyDeviceClasses" |Select-Object "{c06ff265-ae09-48f0-812c-16753d7cba83}"
+ $policyValue = $policyValue."{c06ff265-ae09-48f0-812c-16753d7cba83}"
+ $policyValueBuffer += "{c06ff265-ae09-48f0-812c-16753d7cba83}" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions\DenyDeviceClasses" |Select-Object "{6bdd1fc1-810f-11d0-bec7-08002be2092f}"
+ $policyValue = $policyValue."{6bdd1fc1-810f-11d0-bec7-08002be2092f}"
+ $policyValueBuffer += "{6bdd1fc1-810f-11d0-bec7-08002be2092f}" + ":" + "$policyValue" + "|"
+ $policyValue = $policyValueBuffer 
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "DIR" + "18.9.7.1.6"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prevent installation of devices using drivers that match these device setup classes: Also apply to matching devices that are already installed.' is set to 'True', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prevent installation of devices using drivers that match these device setup classes: Also apply to matching devices that are already installed.' is set to 'True', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions" |Select-Object DenyDeviceClassesRetroactive
- $pustoy = $pustoy.DenyDeviceClassesRetroactive
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions" |Select-Object DenyDeviceClassesRetroactive
+ $policyValue = $policyValue.DenyDeviceClassesRetroactive
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "DIR" + "18.9.7.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prevent device metadata retrieval from the Internet' is set to 'Enabled'''' is set to 'True', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prevent device metadata retrieval from the Internet' is set to 'Enabled'''' is set to 'True', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Device Metadata"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Device Metadata" |Select-Object PreventDeviceMetadataFromNetwork
- $pustoy = $pustoy.PreventDeviceMetadataFromNetwork
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Device Metadata" |Select-Object PreventDeviceMetadataFromNetwork
+ $policyValue = $policyValue.PreventDeviceMetadataFromNetwork
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
@@ -5372,20 +4792,18 @@ Write-Host "#########>Begin Early Launch Antimalware audit<#########" -Foregroun
 
 
 $id = "ELA" + "18.9.13.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Boot-Start Driver Initialization Policy' is set to 'Enabled: Good, unknown and bad but critical, value must be 3 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Boot-Start Driver Initialization Policy' is set to 'Enabled: Good, unknown and bad but critical, value must be 3 " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Policies\EarlyLaunch"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Policies\EarlyLaunch" |Select-Object driverLoadPolicy
- $pustoy = $pustoy.driverLoadPolicy
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Policies\EarlyLaunch" |Select-Object driverLoadPolicy
+ $policyValue = $policyValue.driverLoadPolicy
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Logging and tracing audit<#########" -ForegroundColor DarkGreen
@@ -5393,372 +4811,326 @@ Write-Host "#########>Begin Logging and tracing audit<#########" -ForegroundColo
 
 
 $id = "LT" + "18.9.19.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure registry policy processing: Do not apply during periodic background processing' is set to 'Enabled: FALSE', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure registry policy processing: Do not apply during periodic background processing' is set to 'Enabled: FALSE', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Group Policy\{35378EAC-683F-11D2-A89A-00C04FBBCFA2}"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Group Policy\{35378EAC-683F-11D2-A89A-00C04FBBCFA2}" |Select-Object NoBackgroundPolicy
- $pustoy = $pustoy.NoBackgroundPolicy
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Group Policy\{35378EAC-683F-11D2-A89A-00C04FBBCFA2}" |Select-Object NoBackgroundPolicy
+ $policyValue = $policyValue.NoBackgroundPolicy
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "LT" + "18.9.19.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure registry policy processing: Process even if the Group Policy objects have not changed' is set to 'Enabled: TRUE', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure registry policy processing: Process even if the Group Policy objects have not changed' is set to 'Enabled: TRUE', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Group Policy\{35378EAC-683F-11D2-A89A-00C04FBBCFA2}"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Group Policy\{35378EAC-683F-11D2-A89A-00C04FBBCFA2}" |Select-Object NoGPOListChanges
- $pustoy = $pustoy.NoGPOListChanges
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Group Policy\{35378EAC-683F-11D2-A89A-00C04FBBCFA2}" |Select-Object NoGPOListChanges
+ $policyValue = $policyValue.NoGPOListChanges
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "LT" + "18.9.19.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Continue experiences on this device' is set to 'Disabled, value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Continue experiences on this device' is set to 'Disabled, value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object EnableCdp
- $pustoy = $pustoy.EnableCdp
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object EnableCdp
+ $policyValue = $policyValue.EnableCdp
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "LT" + "18.9.19.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn off background refresh of Group Policy' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn off background refresh of Group Policy' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" |Select-Object DisableBkGndGroupPolicy
- $pustoy = $pustoy.DisableBkGndGroupPolicy
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" |Select-Object DisableBkGndGroupPolicy
+ $policyValue = $policyValue.DisableBkGndGroupPolicy
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin Internet Communication Management audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "ICS" + "18.9.20.1.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure Turn off access to the Store is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Turn off access to the Store is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer" |Select-Object NoUseStoreOpenWith
- $pustoy = $pustoy.NoUseStoreOpenWith
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer" |Select-Object NoUseStoreOpenWith
+ $policyValue = $policyValue.NoUseStoreOpenWith
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "ICS" + "18.9.20.1.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure Turn off downloading of print drivers over HTTP, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Turn off downloading of print drivers over HTTP, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers" |Select-Object DisableWebPnPDownload
- $pustoy = $pustoy.DisableWebPnPDownload
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers" |Select-Object DisableWebPnPDownload
+ $policyValue = $policyValue.DisableWebPnPDownload
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "ICS" + "18.9.20.1.3"
-$nulevoy = "$id" + ";" + "(L2)Ensure Turn off handwriting personalization data sharing is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure Turn off handwriting personalization data sharing is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\TabletPC"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\TabletPC" |Select-Object PreventHandwritingDataSharing
- $pustoy = $pustoy.PreventHandwritingDataSharing
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\TabletPC" |Select-Object PreventHandwritingDataSharing
+ $policyValue = $policyValue.PreventHandwritingDataSharing
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "ICS" + "18.9.20.1.4"
-$nulevoy = "$id" + ";" + "(L2)Ensure Turn off handwriting recognition error reporting is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure Turn off handwriting recognition error reporting is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\HandwritingErrorReports"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\HandwritingErrorReports" |Select-Object PreventHandwritingErrorReports
- $pustoy = $pustoy.PreventHandwritingErrorReports
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\HandwritingErrorReports" |Select-Object PreventHandwritingErrorReports
+ $policyValue = $policyValue.PreventHandwritingErrorReports
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "ICS" + "18.9.20.1.5"
 
-$nulevoy = "$id" + ";" + "(L2)Turn off Internet Connection Wizard if URL connection is referring to Microsoft.com is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Turn off Internet Connection Wizard if URL connection is referring to Microsoft.com is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Internet Connection Wizard"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Internet Connection Wizard" |Select-Object ExitOnMSICW
- $pustoy = $pustoy.ExitOnMSICW
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Internet Connection Wizard" |Select-Object ExitOnMSICW
+ $policyValue = $policyValue.ExitOnMSICW
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "ICS" + "18.9.20.1.6"
 
 
-$nulevoy = "$id" + ";" + "(L1)Ensure Turn off Internet download for Web publishing and online ordering wizards is set to 'Enabled' , value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Turn off Internet download for Web publishing and online ordering wizards is set to 'Enabled' , value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" |Select-Object NoWebServices
- $pustoy = $pustoy.NoWebServices
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" |Select-Object NoWebServices
+ $policyValue = $policyValue.NoWebServices
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "ICS" + "18.9.20.1.7"
 
-$nulevoy = "$id" + ";" + "(L2)Ensure Turn off printing over HTTP is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure Turn off printing over HTTP is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers" |Select-Object DisableHTTPPrinting
- $pustoy = $pustoy.DisableHTTPPrinting
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers" |Select-Object DisableHTTPPrinting
+ $policyValue = $policyValue.DisableHTTPPrinting
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "ICS" + "18.9.20.1.8"
 
-$nulevoy = "$id" + ";" + "(L2)Ensure Turn off Registration if URL connection is referring to Microsoft.com is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure Turn off Registration if URL connection is referring to Microsoft.com is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Registration Wizard Control"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Registration Wizard Control" |Select-Object NoRegistration
- $pustoy = $pustoy.NoRegistration
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Registration Wizard Control" |Select-Object NoRegistration
+ $policyValue = $policyValue.NoRegistration
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "ICS" + "18.9.20.1.9"
 
-$nulevoy = "$id" + ";" + "(L2)Ensure Turn off Search Companion content file updates is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure Turn off Search Companion content file updates is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\SearchCompanion" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\SearchCompanion" |Select-Object DisableContentFileUpdates
- $pustoy = $pustoy.DisableContentFileUpdates
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\SearchCompanion" |Select-Object DisableContentFileUpdates
+ $policyValue = $policyValue.DisableContentFileUpdates
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "ICS" + "18.9.20.1.10"
 
-$nulevoy = "$id" + ";" + "(L2)Ensure Turn off the Order Prints picture task is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure Turn off the Order Prints picture task is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" |Select-Object NoOnlinePrintsWizard
- $pustoy = $pustoy.NoOnlinePrintsWizard
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" |Select-Object NoOnlinePrintsWizard
+ $policyValue = $policyValue.NoOnlinePrintsWizard
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "ICS" + "18.9.20.1.11"
 
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Turn off the Publish to Web task for files and folders is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Turn off the Publish to Web task for files and folders is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" |Select-Object NoPublishingWizard
- $pustoy = $pustoy.NoPublishingWizard
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" |Select-Object NoPublishingWizard
+ $policyValue = $policyValue.NoPublishingWizard
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "ICS" + "18.9.20.1.12"
 
-$nulevoy = "$id" + ";" + "(L2)Ensure Turn off the Windows Messenger Customer Experience Improvement Program is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure Turn off the Windows Messenger Customer Experience Improvement Program is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Messenger\Client"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Messenger\Client" |Select-Object CEIP
- $pustoy = $pustoy.CEIP
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Messenger\Client" |Select-Object CEIP
+ $policyValue = $policyValue.CEIP
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "ICS" + "18.9.20.1.13"
 
-$nulevoy = "$id" + ";" + "(L2)Ensure Turn off Windows Customer Experience Improvement Program is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure Turn off Windows Customer Experience Improvement Program is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\SQMClient\Windows"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\SQMClient\Windows" |Select-Object CEIPEnable
- $pustoy = $pustoy.CEIPEnable
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\SQMClient\Windows" |Select-Object CEIPEnable
+ $policyValue = $policyValue.CEIPEnable
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "ICS" + "18.9.20.1.14"
 
-$nulevoy = "$id" + ";" + "(L2)Ensure Turn off Windows Error Reporting is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure Turn off Windows Error Reporting is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting" |Select-Object Disabled
- $pustoy = $pustoy.Disabled
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting" |Select-Object Disabled
+ $policyValue = $policyValue.Disabled
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin Kerberos audit<#########" -ForegroundColor DarkGreen
 
 $id = "KER" + "18.9.23.1"
 
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Support device authentication using certificate' is set to 'Enabled: Automatic, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Support device authentication using certificate' is set to 'Enabled: Automatic, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\kerberos\parameters"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\kerberos\parameters" |Select-Object DevicePKInitBehavior
- $pustoy = $pustoy.DevicePKInitBehavior
- $pustoytemp = "DevicePKInitBehavior" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\kerberos\parameters" |Select-Object DevicePKInitEnabled
- $pustoy = $pustoy.DevicePKInitEnabled
- $pustoytemp = "DevicePKInitEnabled" + ":" + "$pustoy" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\kerberos\parameters" |Select-Object DevicePKInitBehavior
+ $policyValue = $policyValue.DevicePKInitBehavior
+ $policyValueBuffer = "DevicePKInitBehavior" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\kerberos\parameters" |Select-Object DevicePKInitEnabled
+ $policyValue = $policyValue.DevicePKInitEnabled
+ $policyValueBuffer = "DevicePKInitEnabled" + ":" + "$policyValue" + "|"
 }
 else {
- $pustoytemp = "no configuration"
+ $policyValueBuffer = "no configuration"
 }
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin Kernel DMA Protection audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "KDP" + "18.9.24.1"
 
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Enumeration policy for external devices incompatible with Kernel DMA Protection' is set to 'Enabled: Block All', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Enumeration policy for external devices incompatible with Kernel DMA Protection' is set to 'Enabled: Block All', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Kernel DMA Protection"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Kernel DMA Protection" |Select-Object DeviceEnumerationPolicy
- $pustoy = $pustoy.DeviceEnumerationPolicy
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Kernel DMA Protection" |Select-Object DeviceEnumerationPolicy
+ $policyValue = $policyValue.DeviceEnumerationPolicy
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin Local Security Authority audit<#########" -ForegroundColor DarkGreen
 
 $id = "LSA" + "18.9.25.1"
 
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Allow Custom SSPs and APs to be loaded into LSASS' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Allow Custom SSPs and APs to be loaded into LSASS' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object AllowCustomSSPsAPs
- $pustoy = $pustoy.AllowCustomSSPsAPs
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object AllowCustomSSPsAPs
+ $policyValue = $policyValue.AllowCustomSSPsAPs
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "LSA" + "18.9.25.2"
 
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Configures LSASS to run as a protected process' is set to 'Enabled: Enabled with UEFI Lock', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Configures LSASS to run as a protected process' is set to 'Enabled: Enabled with UEFI Lock', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" |Select-Object RunAsPPL
- $pustoy = $pustoy.RunAsPPL
+ $policyValue = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" |Select-Object RunAsPPL
+ $policyValue = $policyValue.RunAsPPL
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin Locale Services audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "LS" + "18.9.26.1"
 
-$nulevoy = "$id" + ";" + "(L2)Ensure Disallow copying of user input methods to the system account for sign-in is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure Disallow copying of user input methods to the system account for sign-in is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Control Panel\International"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Control Panel\International" |Select-Object BlockUserInputMethodsForSignIn
- $pustoy = $pustoy.BlockUserInputMethodsForSignIn
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Control Panel\International" |Select-Object BlockUserInputMethodsForSignIn
+ $policyValue = $policyValue.BlockUserInputMethodsForSignIn
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 Write-Host "#########>Begin Logon audit<#########" -ForegroundColor DarkGreen
@@ -5766,453 +5138,399 @@ Write-Host "#########>Begin Logon audit<#########" -ForegroundColor DarkGreen
 
 $id = "LOGON" + "18.9.27.1"
 
-$nulevoy = "$id" + ";" + "(L1)Ensure Block user from showing account details on sign-in is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Block user from showing account details on sign-in is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object BlockUserFromShowingAccountDetailsOnSignin
- $pustoy = $pustoy.BlockUserFromShowingAccountDetailsOnSignin
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object BlockUserFromShowingAccountDetailsOnSignin
+ $policyValue = $policyValue.BlockUserFromShowingAccountDetailsOnSignin
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "LOGON" + "18.9.27.2"
 
-$nulevoy = "$id" + ";" + "(L1)Ensure Do not display network selection UI is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Do not display network selection UI is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object DontDisplayNetworkSelectionUI
- $pustoy = $pustoy.DontDisplayNetworkSelectionUI
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object DontDisplayNetworkSelectionUI
+ $policyValue = $policyValue.DontDisplayNetworkSelectionUI
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "LOGON" + "18.9.27.3"
 
-$nulevoy = "$id" + ";" + "Ensure Do not enumerate connected users on domain-joined computers is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "Ensure Do not enumerate connected users on domain-joined computers is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object DontEnumerateConnectedUsers
- $pustoy = $pustoy.DontEnumerateConnectedUsers
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object DontEnumerateConnectedUsers
+ $policyValue = $policyValue.DontEnumerateConnectedUsers
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "LOGON" + "18.9.27.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Enumerate local users on domain-joined computers' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Enumerate local users on domain-joined computers' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object EnumerateLocalUsers
- $pustoy = $pustoy.EnumerateLocalUsers
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object EnumerateLocalUsers
+ $policyValue = $policyValue.EnumerateLocalUsers
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "LOGON" + "18.9.27.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure Turn off app notifications on the lock screen is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Turn off app notifications on the lock screen is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object DisableLockScreenAppNotifications
- $pustoy = $pustoy.DisableLockScreenAppNotifications
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object DisableLockScreenAppNotifications
+ $policyValue = $policyValue.DisableLockScreenAppNotifications
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "LOGON" + "18.9.27.6"
 
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn off picture password sign-in' is set to 'Enabled', value must be1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn off picture password sign-in' is set to 'Enabled', value must be1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object BlockDomainPicturePassword
- $pustoy = $pustoy.BlockDomainPicturePassword
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object BlockDomainPicturePassword
+ $policyValue = $policyValue.BlockDomainPicturePassword
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "LOGON" + "18.9.27.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn on convenience PIN sign-in' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn on convenience PIN sign-in' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object AllowDomainPINLogon
- $pustoy = $pustoy.AllowDomainPINLogon
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object AllowDomainPINLogon
+ $policyValue = $policyValue.AllowDomainPINLogon
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin OS Policies audit<#########" -ForegroundColor DarkGreen
 
 $id = "OP" + "18.9.30.1"
-$nulevoy = "$id" + ";" + "(L2) Ensure 'Allow Clipboard synchronization across devices' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2) Ensure 'Allow Clipboard synchronization across devices' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object AllowCrossDeviceClipboard
- $pustoy = $pustoy.AllowCrossDeviceClipboard
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object AllowCrossDeviceClipboard
+ $policyValue = $policyValue.AllowCrossDeviceClipboard
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "OP" + "18.9.30.2"
-$nulevoy = "$id" + ";" + "(L2) Ensure 'Allow upload of User Activities' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2) Ensure 'Allow upload of User Activities' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object UploadUserActivities
- $pustoy = $pustoy.UploadUserActivities
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object UploadUserActivities
+ $policyValue = $policyValue.UploadUserActivities
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 Write-Host "#########>Begin Sleep Settings audit<#########" -ForegroundColor DarkGreen
 
 $id = "SLEEP" + "18.9.32.6.1"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Allow network connectivity during connected-standby (on battery)' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Allow network connectivity during connected-standby (on battery)' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\f15576e8-98b7-4186-b944-eafa664402d9" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\f15576e8-98b7-4186-b944-eafa664402d9" |Select-Object DCSettingIndex
- $pustoy = $pustoy.DCSettingIndex
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\f15576e8-98b7-4186-b944-eafa664402d9" |Select-Object DCSettingIndex
+ $policyValue = $policyValue.DCSettingIndex
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "SLEEP" + "18.9.32.6.2"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Allow network connectivity during connected-standby (plugged in)' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Allow network connectivity during connected-standby (plugged in)' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\f15576e8-98b7-4186-b944-eafa664402d9" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\f15576e8-98b7-4186-b944-eafa664402d9" |Select-Object ACSettingIndex
- $pustoy = $pustoy.ACSettingIndex
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\f15576e8-98b7-4186-b944-eafa664402d9" |Select-Object ACSettingIndex
+ $policyValue = $policyValue.ACSettingIndex
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "SLEEP" + "18.9.32.6.3"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Allow standby states (S1-S3) when sleeping (on battery)' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Allow standby states (S1-S3) when sleeping (on battery)' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\abfc2519-3608-4c2a-94ea-171b0ed546ab" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\abfc2519-3608-4c2a-94ea-171b0ed546ab" |Select-Object DCSettingIndex
- $pustoy = $pustoy.DCSettingIndex
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\abfc2519-3608-4c2a-94ea-171b0ed546ab" |Select-Object DCSettingIndex
+ $policyValue = $policyValue.DCSettingIndex
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "SLEEP" + "18.9.32.6.4"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Allow standby states (S1-S3) when sleeping (plugged in)' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Allow standby states (S1-S3) when sleeping (plugged in)' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\abfc2519-3608-4c2a-94ea-171b0ed546ab" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\abfc2519-3608-4c2a-94ea-171b0ed546ab" |Select-Object ACSettingIndex
- $pustoy = $pustoy.ACSettingIndex
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\abfc2519-3608-4c2a-94ea-171b0ed546ab" |Select-Object ACSettingIndex
+ $policyValue = $policyValue.ACSettingIndex
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "SLEEP" + "18.9.32.6.5"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Require a password when a computer wakes (on battery)' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Require a password when a computer wakes (on battery)' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51" |Select-Object DCSettingIndex
- $pustoy = $pustoy.DCSettingIndex
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51" |Select-Object DCSettingIndex
+ $policyValue = $policyValue.DCSettingIndex
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "SLEEP" + "18.9.32.6.6"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Require a password when a computer wakes (plugged in)' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Require a password when a computer wakes (plugged in)' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51" |Select-Object ACSettingIndex
- $pustoy = $pustoy.ACSettingIndex
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51" |Select-Object ACSettingIndex
+ $policyValue = $policyValue.ACSettingIndex
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 Write-Host "#########>Begin Remote Assistance audit<#########" -ForegroundColor DarkGreen
 
 $id = "RA" + "18.9.34.1"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Configure Offer Remote Assistance' is set to 'Disabled, value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Configure Offer Remote Assistance' is set to 'Disabled, value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fAllowUnsolicited
- $pustoy = $pustoy.fAllowUnsolicited
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fAllowUnsolicited
+ $policyValue = $policyValue.fAllowUnsolicited
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "RA" + "18.9.34.2"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Configure Solicited Remote Assistance' is set to 'Disabled'', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Configure Solicited Remote Assistance' is set to 'Disabled'', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fAllowToGetHelp
- $pustoy = $pustoy.fAllowToGetHelp
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fAllowToGetHelp
+ $policyValue = $policyValue.fAllowToGetHelp
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin Remote Procedure Call audit<#########" -ForegroundColor DarkGreen
 
 $id = "RPC" + "18.9.35.1"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Enable RPC Endpoint Mapper Client Authentication' is set to 'Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Enable RPC Endpoint Mapper Client Authentication' is set to 'Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Rpc"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Rpc" |Select-Object EnableAuthEpResolution
- $pustoy = $pustoy.EnableAuthEpResolution
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Rpc" |Select-Object EnableAuthEpResolution
+ $policyValue = $policyValue.EnableAuthEpResolution
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RPC" + "18.9.35.2"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Restrict Unauthenticated RPC clients' is set to 'Enabled: Authenticated', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Restrict Unauthenticated RPC clients' is set to 'Enabled: Authenticated', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Rpc" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Rpc" |Select-Object RestrictRemoteClients
- $pustoy = $pustoy.RestrictRemoteClients
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Rpc" |Select-Object RestrictRemoteClients
+ $policyValue = $policyValue.RestrictRemoteClients
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin Microsoft Support Diagnostic Tool audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "MSDT" + "18.9.46.5.1"
-$nulevoy = "$id" + ";" + "(L2) Ensure 'Microsoft Support Diagnostic Tool: Turn on MSDT interactive communication with support provider' is set to 'Disabled, value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2) Ensure 'Microsoft Support Diagnostic Tool: Turn on MSDT interactive communication with support provider' is set to 'Disabled, value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\ScriptedDiagnosticsProvider\Policy" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\ScriptedDiagnosticsProvider\Policy" |Select-Object DisableQueryRemoteServer
- $pustoy = $pustoy.DisableQueryRemoteServer
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\ScriptedDiagnosticsProvider\Policy" |Select-Object DisableQueryRemoteServer
+ $policyValue = $policyValue.DisableQueryRemoteServer
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Windows Performance PerfTrack audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "WPP" + "18.9.46.11.1"
-$nulevoy = "$id" + ";" + "(L2) Ensure 'Enable/Disable PerfTrack' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2) Ensure 'Enable/Disable PerfTrack' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WDI\{9c5a40da-b965-4fc3-8781-88dd50a6299d}"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WDI\{9c5a40da-b965-4fc3-8781-88dd50a6299d}" |Select-Object ScenarioExecutionEnabled
- $pustoy = $pustoy.ScenarioExecutionEnabled
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WDI\{9c5a40da-b965-4fc3-8781-88dd50a6299d}" |Select-Object ScenarioExecutionEnabled
+ $policyValue = $policyValue.ScenarioExecutionEnabled
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin User Profiles audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "UP" + "18.9.48.1"
-$nulevoy = "$id" + ";" + "(L2) Ensure 'Turn off the advertising ID' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2) Ensure 'Turn off the advertising ID' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\policies\Microsoft\Windows\AdvertisingInfo" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\policies\Microsoft\Windows\AdvertisingInfo" |Select-Object DisabledByGroupPolicy
- $pustoy = $pustoy.DisabledByGroupPolicy
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\policies\Microsoft\Windows\AdvertisingInfo" |Select-Object DisabledByGroupPolicy
+ $policyValue = $policyValue.DisabledByGroupPolicy
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Time Providers audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "TP" + "18.9.50.1.1"
-$nulevoy = "$id" + ";" + "(L2) Ensure 'Enable Windows NTP Client' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2) Ensure 'Enable Windows NTP Client' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\W32Time\TimeProviders\NtpClient"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\W32Time\TimeProviders\NtpClient" |Select-Object Enabled
- $pustoy = $pustoy.Enabled
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\W32Time\TimeProviders\NtpClient" |Select-Object Enabled
+ $policyValue = $policyValue.Enabled
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "TP" + "18.9.50.1.2"
-$nulevoy = "$id" + ";" + "(L2) Ensure 'Enable Windows NTP Server' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2) Ensure 'Enable Windows NTP Server' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\W32Time\TimeProviders\NtpServer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\W32Time\TimeProviders\NtpServer" |Select-Object Enabled
- $pustoy = $pustoy.Enabled
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\W32Time\TimeProviders\NtpServer" |Select-Object Enabled
+ $policyValue = $policyValue.Enabled
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin App Package Deployment audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "APD" + "18.10.3.1"
-$nulevoy = "$id" + ";" + "(L2) Ensure Allow a Windows app to share application data between users, value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2) Ensure Allow a Windows app to share application data between users, value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\AppModel\StateManager"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\AppModel\StateManager" |Select-Object AllowSharedLocalAppData
- $pustoy = $pustoy.AllowSharedLocalAppData
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\AppModel\StateManager" |Select-Object AllowSharedLocalAppData
+ $policyValue = $policyValue.AllowSharedLocalAppData
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "APD" + "18.10.3.2"
-$nulevoy = "$id" + ";" + "Ensure 'Prevent non-admin users from installing packaged Windows apps' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "Ensure 'Prevent non-admin users from installing packaged Windows apps' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Appx"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Appx" |Select-Object BlockNonAdminUserInstall
- $pustoy = $pustoy.BlockNonAdminUserInstall
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Appx" |Select-Object BlockNonAdminUserInstall
+ $policyValue = $policyValue.BlockNonAdminUserInstall
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin App Privacy audit<#########" -ForegroundColor DarkGreen
 
 $id = "APP" + "18.10.4.1"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Let Windows apps activate with voice while the system is locked' is set to 'Enabled: Force Deny', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Let Windows apps activate with voice while the system is locked' is set to 'Enabled: Force Deny', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" |Select-Object LetAppsActivateWithVoiceAboveLock
- $pustoy = $pustoy.LetAppsActivateWithVoiceAboveLock
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" |Select-Object LetAppsActivateWithVoiceAboveLock
+ $policyValue = $policyValue.LetAppsActivateWithVoiceAboveLock
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin App runtime audit<#########" -ForegroundColor DarkGreen
@@ -6220,859 +5538,753 @@ Write-Host "#########>Begin App runtime audit<#########" -ForegroundColor DarkGr
 
 $id = "AR" + "18.10.5.1"
 
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Allow Microsoft accounts to be optional' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Allow Microsoft accounts to be optional' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" |Select-Object MSAOptional
- $pustoy = $pustoy.MSAOptional
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" |Select-Object MSAOptional
+ $policyValue = $policyValue.MSAOptional
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "AR" + "18.10.5.2"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Block launching Windows Store apps with Windows Runtime API access from hosted content.' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Block launching Windows Store apps with Windows Runtime API access from hosted content.' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" |Select-Object BlockHostedAppAccessWinRT
- $pustoy = $pustoy.BlockHostedAppAccessWinRT
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" |Select-Object BlockHostedAppAccessWinRT
+ $policyValue = $policyValue.BlockHostedAppAccessWinRT
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin AutoPlay Policies audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "AP" + "18.10.7.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Disallow Autoplay for non-volume devices' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Disallow Autoplay for non-volume devices' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer" |Select-Object NoAutoplayfornonVolume
- $pustoy = $pustoy.NoAutoplayfornonVolume
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer" |Select-Object NoAutoplayfornonVolume
+ $policyValue = $policyValue.NoAutoplayfornonVolume
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 $id = "AP" + "18.10.7.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Set the default behavior for AutoRun' is set to 'Enabled: Do not execute any autorun commands', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Set the default behavior for AutoRun' is set to 'Enabled: Do not execute any autorun commands', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" |Select-Object NoAutorun
- $pustoy = $pustoy.NoAutorun
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" |Select-Object NoAutorun
+ $policyValue = $policyValue.NoAutorun
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "AP" + "18.10.7.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn off Autoplay' is set to 'Enabled: All drives'', value must be B5 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn off Autoplay' is set to 'Enabled: All drives'', value must be B5 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" |Select-Object NoDriveTypeAutoRun
- $pustoy = $pustoy.NoDriveTypeAutoRun
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" |Select-Object NoDriveTypeAutoRun
+ $policyValue = $policyValue.NoDriveTypeAutoRun
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Facial Features audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "FF" + "18.10.8.1.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Use enhanced anti-spoofing when available' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Use enhanced anti-spoofing when available' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Biometrics\FacialFeatures"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Biometrics\FacialFeatures" |Select-Object EnhancedAntiSpoofing
- $pustoy = $pustoy.EnhancedAntiSpoofing
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Biometrics\FacialFeatures" |Select-Object EnhancedAntiSpoofing
+ $policyValue = $policyValue.EnhancedAntiSpoofing
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin BitLocker Drive Encryption audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "BDE" + "18.10.9.1.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow access to BitLocker-protected fixed data drives from earlier versions of Windows' is set to 'Disabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow access to BitLocker-protected fixed data drives from earlier versions of Windows' is set to 'Disabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVDiscoveryVolumeType
- $pustoy = $pustoy.FDVDiscoveryVolumeType
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVDiscoveryVolumeType
+ $policyValue = $policyValue.FDVDiscoveryVolumeType
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "BDE" + "18.10.9.1.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVRecovery
- $pustoy = $pustoy.FDVRecovery
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVRecovery
+ $policyValue = $policyValue.FDVRecovery
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "BDE" + "18.10.9.1.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered: Allow data recovery agent' is set to 'Enabled: True', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered: Allow data recovery agent' is set to 'Enabled: True', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVManageDRA
- $pustoy = $pustoy.FDVManageDRA
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVManageDRA
+ $policyValue = $policyValue.FDVManageDRA
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "BDE" + "18.10.9.1.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered: Recovery Password' is set to 'Enabled: Allow 48-digit recovery password', value must be 2 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered: Recovery Password' is set to 'Enabled: Allow 48-digit recovery password', value must be 2 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVRecoveryPassword
- $pustoy = $pustoy.FDVRecoveryPassword
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVRecoveryPassword
+ $policyValue = $policyValue.FDVRecoveryPassword
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "BDE" + "18.10.9.1.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered: Recovery Key' is set to 'Enabled: Allow 256-bit recovery key', value must be 2 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered: Recovery Key' is set to 'Enabled: Allow 256-bit recovery key', value must be 2 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVRecoveryKey
- $pustoy = $pustoy.FDVRecoveryKey
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVRecoveryKey
+ $policyValue = $policyValue.FDVRecoveryKey
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "BDE" + "18.10.9.1.6"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered: Omit recovery options from the BitLocker setup wizard' is set to 'Enabled: True', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered: Omit recovery options from the BitLocker setup wizard' is set to 'Enabled: True', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVHideRecoveryPage
- $pustoy = $pustoy.FDVHideRecoveryPage
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVHideRecoveryPage
+ $policyValue = $policyValue.FDVHideRecoveryPage
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "BDE" + "18.10.9.1.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered: Save BitLocker recovery information to AD DS for fixed data drives' is set to 'Enabled: False', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered: Save BitLocker recovery information to AD DS for fixed data drives' is set to 'Enabled: False', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVActiveDirectoryBackup
- $pustoy = $pustoy.FDVActiveDirectoryBackup
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVActiveDirectoryBackup
+ $policyValue = $policyValue.FDVActiveDirectoryBackup
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "BDE" + "18.10.9.1.8"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered: Configure storage of BitLocker recovery information to AD DS' is set to 'Enabled: Backup recovery passwords and key packages', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered: Configure storage of BitLocker recovery information to AD DS' is set to 'Enabled: Backup recovery passwords and key packages', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVActiveDirectoryBackup
- $pustoy = $pustoy.FDVActiveDirectoryBackup
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVActiveDirectoryBackup
+ $policyValue = $policyValue.FDVActiveDirectoryBackup
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "BDE" + "18.10.9.1.9"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered: Do not enable BitLocker until recovery information is stored to AD DS for fixed data drives' is set to 'Enabled: False', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected fixed drives can be recovered: Do not enable BitLocker until recovery information is stored to AD DS for fixed data drives' is set to 'Enabled: False', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVRequireActiveDirectoryBackup
- $pustoy = $pustoy.FDVRequireActiveDirectoryBackup
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVRequireActiveDirectoryBackup
+ $policyValue = $policyValue.FDVRequireActiveDirectoryBackup
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "BDE" + "18.10.9.1.10"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure use of hardware-based encryption for fixed data drives' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure use of hardware-based encryption for fixed data drives' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVHardwareEncryption
- $pustoy = $pustoy.FDVHardwareEncryption
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVHardwareEncryption
+ $policyValue = $policyValue.FDVHardwareEncryption
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "BDE" + "18.10.9.1.11"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure use of passwords for fixed data drives' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure use of passwords for fixed data drives' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVPassphrase
- $pustoy = $pustoy.FDVPassphrase
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVPassphrase
+ $policyValue = $policyValue.FDVPassphrase
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 
 $id = "BDE" + "18.10.9.1.12"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure use of smart cards on fixed data drives' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure use of smart cards on fixed data drives' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVAllowUserCert
- $pustoy = $pustoy.FDVAllowUserCert
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVAllowUserCert
+ $policyValue = $policyValue.FDVAllowUserCert
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "BDE" + "18.10.9.1.13"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure use of smart cards on fixed data drives: Require use of smart cards on fixed data drives' is set to 'Enabled: True', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure use of smart cards on fixed data drives: Require use of smart cards on fixed data drives' is set to 'Enabled: True', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVEnforceUserCert
- $pustoy = $pustoy.FDVEnforceUserCert
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object FDVEnforceUserCert
+ $policyValue = $policyValue.FDVEnforceUserCert
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin Operating System Drivesn audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "OSD" + "18.10.9.2.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow enhanced PINs for startup' is set to 'Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow enhanced PINs for startup' is set to 'Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object UseEnhancedPin
- $pustoy = $pustoy.UseEnhancedPin
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object UseEnhancedPin
+ $policyValue = $policyValue.UseEnhancedPin
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "OSD" + "18.10.9.2.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow Secure Boot for integrity validation' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow Secure Boot for integrity validation' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSAllowSecureBootForIntegrity
- $pustoy = $pustoy.OSAllowSecureBootForIntegrity
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSAllowSecureBootForIntegrity
+ $policyValue = $policyValue.OSAllowSecureBootForIntegrity
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "OSD" + "18.10.9.2.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSRecovery
- $pustoy = $pustoy.OSRecovery
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSRecovery
+ $policyValue = $policyValue.OSRecovery
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "OSD" + "18.10.9.2.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered: Allow data recovery agent' is set to 'Enabled: False', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered: Allow data recovery agent' is set to 'Enabled: False', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSManageDRA
- $pustoy = $pustoy.OSManageDRA
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSManageDRA
+ $policyValue = $policyValue.OSManageDRA
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "OSD" + "18.10.9.2.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered: Recovery Password' is set to 'Enabled: Require 48-digit recovery password', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered: Recovery Password' is set to 'Enabled: Require 48-digit recovery password', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSRecoveryPassword
- $pustoy = $pustoy.OSRecoveryPassword
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSRecoveryPassword
+ $policyValue = $policyValue.OSRecoveryPassword
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "OSD" + "18.10.9.2.6"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered: Recovery Key' is set to 'Enabled: Do not allow 256-bit recovery key', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered: Recovery Key' is set to 'Enabled: Do not allow 256-bit recovery key', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSRecoveryKey
- $pustoy = $pustoy.OSRecoveryKey
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSRecoveryKey
+ $policyValue = $policyValue.OSRecoveryKey
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "OSD" + "18.10.9.2.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered: Omit recovery options from the BitLocker setup wizard' is set to 'Enabled: True', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered: Omit recovery options from the BitLocker setup wizard' is set to 'Enabled: True', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSHideRecoveryPage
- $pustoy = $pustoy.OSHideRecoveryPage
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSHideRecoveryPage
+ $policyValue = $policyValue.OSHideRecoveryPage
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "OSD" + "18.10.9.2.8"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered: Save BitLocker recovery information to AD DS for operating system drives' is set to 'Enabled: True', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered: Save BitLocker recovery information to AD DS for operating system drives' is set to 'Enabled: True', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSActiveDirectoryBackup
- $pustoy = $pustoy.OSActiveDirectoryBackup
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSActiveDirectoryBackup
+ $policyValue = $policyValue.OSActiveDirectoryBackup
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "OSD" + "18.10.9.2.9"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered: Configure storage of BitLocker recovery information to AD DS:' is set to 'Enabled: Store recovery passwords and key packages'', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered: Configure storage of BitLocker recovery information to AD DS:' is set to 'Enabled: Store recovery passwords and key packages'', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSActiveDirectoryInfoToStore
- $pustoy = $pustoy.OSActiveDirectoryInfoToStore
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSActiveDirectoryInfoToStore
+ $policyValue = $policyValue.OSActiveDirectoryInfoToStore
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "OSD" + "18.10.9.2.10"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered: Do not enable BitLocker until recovery information is stored to AD DS for operating system drives', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected operating system drives can be recovered: Do not enable BitLocker until recovery information is stored to AD DS for operating system drives', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSRequireActiveDirectoryBackup
- $pustoy = $pustoy.OSRequireActiveDirectoryBackup
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSRequireActiveDirectoryBackup
+ $policyValue = $policyValue.OSRequireActiveDirectoryBackup
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "OSD" + "18.10.9.2.11"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure use of hardware-based encryption for operating system drives' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure use of hardware-based encryption for operating system drives' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSHardwareEncryption
- $pustoy = $pustoy.OSHardwareEncryption
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSHardwareEncryption
+ $policyValue = $policyValue.OSHardwareEncryption
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "OSD" + "18.10.9.2.12"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure use of passwords for operating system drives' is set to 'Disabled'', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure use of passwords for operating system drives' is set to 'Disabled'', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSPassphrase
- $pustoy = $pustoy.OSPassphrase
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object OSPassphrase
+ $policyValue = $policyValue.OSPassphrase
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 
 $id = "OSD" + "18.10.9.2.13"
-$nulevoy = "$id" + ";" + "Ensure 'Require additional authentication at startup' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "Ensure 'Require additional authentication at startup' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object UseAdvancedStartup
- $pustoy = $pustoy.UseAdvancedStartup
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object UseAdvancedStartup
+ $policyValue = $policyValue.UseAdvancedStartup
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "OSD" + "18.10.9.2.14"
-$nulevoy = "$id" + ";" + "Ensure 'Require additional authentication at startup: Allow BitLocker without a compatible TPM' is set to 'Enabled: False', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "Ensure 'Require additional authentication at startup: Allow BitLocker without a compatible TPM' is set to 'Enabled: False', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object EnableBDEWithNoTPM
- $pustoy = $pustoy.EnableBDEWithNoTPM
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object EnableBDEWithNoTPM
+ $policyValue = $policyValue.EnableBDEWithNoTPM
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Removable Data Drives audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "RDD" + "18.10.9.3.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow access to BitLocker-protected removable data drives from earlier versions of Windows' is set to 'Disabled', value must be empty " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow access to BitLocker-protected removable data drives from earlier versions of Windows' is set to 'Disabled', value must be empty " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVDiscoveryVolumeType
- $pustoy = $pustoy.RDVDiscoveryVolumeType
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVDiscoveryVolumeType
+ $policyValue = $policyValue.RDVDiscoveryVolumeType
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "RDD" + "18.10.9.3.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVRecovery
- $pustoy = $pustoy.RDVRecovery
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVRecovery
+ $policyValue = $policyValue.RDVRecovery
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDD" + "18.10.9.3.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered: Allow data recovery agent' is set to 'Enabled: True', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered: Allow data recovery agent' is set to 'Enabled: True', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVManageDRA
- $pustoy = $pustoy.RDVManageDRA
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVManageDRA
+ $policyValue = $policyValue.RDVManageDRA
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "RDD" + "18.10.9.3.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered: Recovery Password' is set to 'Enabled: Do not allow 48-digit recovery password', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered: Recovery Password' is set to 'Enabled: Do not allow 48-digit recovery password', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVRecoveryPassword
- $pustoy = $pustoy.RDVRecoveryPassword
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVRecoveryPassword
+ $policyValue = $policyValue.RDVRecoveryPassword
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "RDD" + "18.10.9.3.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered: Recovery Key' is set to 'Enabled: Do not allow 256-bit recovery key', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered: Recovery Key' is set to 'Enabled: Do not allow 256-bit recovery key', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVRecoveryKey
- $pustoy = $pustoy.RDVRecoveryKey
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVRecoveryKey
+ $policyValue = $policyValue.RDVRecoveryKey
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "RDD" + "18.10.9.3.6"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered: Omit recovery options from the BitLocker setup wizard' is set to 'Enabled: True', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered: Omit recovery options from the BitLocker setup wizard' is set to 'Enabled: True', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVHideRecoveryPage
- $pustoy = $pustoy.RDVHideRecoveryPage
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVHideRecoveryPage
+ $policyValue = $policyValue.RDVHideRecoveryPage
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDD" + "18.10.9.3.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered: Save BitLocker recovery information to AD DS for removable data drives' is set to 'Enabled: False', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered: Save BitLocker recovery information to AD DS for removable data drives' is set to 'Enabled: False', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVActiveDirectoryBackup
- $pustoy = $pustoy.RDVActiveDirectoryBackup
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVActiveDirectoryBackup
+ $policyValue = $policyValue.RDVActiveDirectoryBackup
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "RDD" + "18.10.9.3.8"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered: Configure storage of BitLocker recovery information to AD DS:' is set to 'Enabled: Backup recovery passwords and key packages', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered: Configure storage of BitLocker recovery information to AD DS:' is set to 'Enabled: Backup recovery passwords and key packages', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVActiveDirectoryInfoToStore
- $pustoy = $pustoy.RDVActiveDirectoryInfoToStore
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVActiveDirectoryInfoToStore
+ $policyValue = $policyValue.RDVActiveDirectoryInfoToStore
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "RDD" + "18.10.9.3.9"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered: Do not enable BitLocker until recovery information is stored to AD DS for removable data drives' is set to 'Enabled: False', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Choose how BitLocker-protected removable drives can be recovered: Do not enable BitLocker until recovery information is stored to AD DS for removable data drives' is set to 'Enabled: False', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVRequireActiveDirectoryBackup
- $pustoy = $pustoy.RDVRequireActiveDirectoryBackup
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVRequireActiveDirectoryBackup
+ $policyValue = $policyValue.RDVRequireActiveDirectoryBackup
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDD" + "18.10.9.3.10"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Ensure 'Configure use of hardware-based encryption for removable data drives' is set to 'Disabled'', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Ensure 'Configure use of hardware-based encryption for removable data drives' is set to 'Disabled'', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVHardwareEncryption
- $pustoy = $pustoy.RDVHardwareEncryption
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVHardwareEncryption
+ $policyValue = $policyValue.RDVHardwareEncryption
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "RDD" + "18.10.9.3.11"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure use of passwords for removable data drives' is set to 'Disable, value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure use of passwords for removable data drives' is set to 'Disable, value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVPassphrase
- $pustoy = $pustoy.RDVPassphrase
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVPassphrase
+ $policyValue = $policyValue.RDVPassphrase
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "RDD" + "18.10.9.3.12"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure use of smart cards on removable data drives' is set to 'Enabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure use of smart cards on removable data drives' is set to 'Enabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVAllowUserCert
- $pustoy = $pustoy.RDVAllowUserCert
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVAllowUserCert
+ $policyValue = $policyValue.RDVAllowUserCert
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDD" + "18.10.9.3.13"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure use of smart cards on removable data drives: Require use of smart cards on removable data drives' is set to 'Enabled: True', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure use of smart cards on removable data drives: Require use of smart cards on removable data drives' is set to 'Enabled: True', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVEnforceUserCert
- $pustoy = $pustoy.RDVEnforceUserCert
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVEnforceUserCert
+ $policyValue = $policyValue.RDVEnforceUserCert
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDD" + "18.10.9.3.14"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Deny write access to removable drives not protected by BitLocker' is set to 'Enabled'', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Deny write access to removable drives not protected by BitLocker' is set to 'Enabled'', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVDenyWriteAccess
- $pustoy = $pustoy.RDVDenyWriteAccess
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVDenyWriteAccess
+ $policyValue = $policyValue.RDVDenyWriteAccess
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDD" + "18.10.9.3.15"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Deny write access to removable drives not protected by BitLocker: Do not allow write access to devices configured in another organization' is set to 'Enabled: False', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Deny write access to removable drives not protected by BitLocker: Do not allow write access to devices configured in another organization' is set to 'Enabled: False', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVDenyCrossOrg
- $pustoy = $pustoy.RDVDenyCrossOrg
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object RDVDenyCrossOrg
+ $policyValue = $policyValue.RDVDenyCrossOrg
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "RDD" + "18.10.9.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Disable new DMA devices when this computer is locked' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Disable new DMA devices when this computer is locked' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\FVE"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object DisableExternalDMAUnderLock
- $pustoy = $pustoy.DisableExternalDMAUnderLock
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\FVE" |Select-Object DisableExternalDMAUnderLock
+ $policyValue = $policyValue.DisableExternalDMAUnderLock
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 Write-Host "#########>Begin Camera audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "CAM" + "18.10.10.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Allow Use of Camera' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Allow Use of Camera' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Camera"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Camera" |Select-Object AllowCamera
- $pustoy = $pustoy.AllowCamera
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Camera" |Select-Object AllowCamera
+ $policyValue = $policyValue.AllowCamera
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin Cloud Content audit<#########" -ForegroundColor DarkGreen
 
 
 
 $id = "CLOUD" + "18.10.12.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Turn off cloud consumer account state content' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Turn off cloud consumer account state content' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" |Select-Object DisableConsumerAccountStateContent
- $pustoy = $pustoy.DisableConsumerAccountStateContent
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" |Select-Object DisableConsumerAccountStateContent
+ $policyValue = $policyValue.DisableConsumerAccountStateContent
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "CLOUD" + "18.10.12.2"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Turn off cloud optimized content' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Turn off cloud optimized content' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" |Select-Object DisableCloudOptimizedContent
- $pustoy = $pustoy.DisableCloudOptimizedContent
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" |Select-Object DisableCloudOptimizedContent
+ $policyValue = $policyValue.DisableCloudOptimizedContent
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "CLOUD" + "18.10.12.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn off Microsoft consumer experiences' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn off Microsoft consumer experiences' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" |Select-Object DisableWindowsConsumerFeatures
- $pustoy = $pustoy.DisableWindowsConsumerFeatures
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" |Select-Object DisableWindowsConsumerFeatures
+ $policyValue = $policyValue.DisableWindowsConsumerFeatures
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -7081,19 +6293,17 @@ Write-Host "#########>Begin Connect audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "CONNECT" + "18.10.13.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure Require pin for pairing is set to Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Require pin for pairing is set to Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Connect"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Connect" |Select-Object RequirePinForPairing
- $pustoy = $pustoy.RequirePinForPairing
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Connect" |Select-Object RequirePinForPairing
+ $policyValue = $policyValue.RequirePinForPairing
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Credential User Interface audit<#########" -ForegroundColor DarkGreen
@@ -7101,266 +6311,234 @@ Write-Host "#########>Begin Credential User Interface audit<#########" -Foregrou
 
 
 $id = "CUI" + "18.10.14.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Do not display the password reveal button' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Do not display the password reveal button' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CredUI" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CredUI" |Select-Object DisablePasswordReveal
- $pustoy = $pustoy.DisablePasswordReveal
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CredUI" |Select-Object DisablePasswordReveal
+ $policyValue = $policyValue.DisablePasswordReveal
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "CUI" + "18.10.14.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Enumerate administrator accounts on elevation' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Enumerate administrator accounts on elevation' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\CredUI"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\CredUI" |Select-Object EnumerateAdministrators
- $pustoy = $pustoy.EnumerateAdministrators
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\CredUI" |Select-Object EnumerateAdministrators
+ $policyValue = $policyValue.EnumerateAdministrators
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "CUI" + "18.10.14.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prevent the use of security questions for local accounts' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prevent the use of security questions for local accounts' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object NoLocalPasswordResetQuestions
- $pustoy = $pustoy.NoLocalPasswordResetQuestions
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object NoLocalPasswordResetQuestions
+ $policyValue = $policyValue.NoLocalPasswordResetQuestions
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Data Collection and Preview Builds audit<#########" -ForegroundColor DarkGreen
 
 $id = "DCPB" + "18.10.15.1"
 
-$nulevoy = "$id" + ";" + "(L1)Ensure'Allow Diagnostic Data' is set to 'Enabled: Diagnostic data off (not recommended)' or 'Enabled: Send required diagnostic data'' , value must be 0(recommended) or 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure'Allow Diagnostic Data' is set to 'Enabled: Diagnostic data off (not recommended)' or 'Enabled: Send required diagnostic data'' , value must be 0(recommended) or 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" |Select-Object AllowTelemetry
- $pustoy = $pustoy.AllowTelemetry
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" |Select-Object AllowTelemetry
+ $policyValue = $policyValue.AllowTelemetry
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 
 $id = "DCPB" + "18.10.15.2"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Configure Authenticated Proxy usage for the Connected User Experience and Telemetry service' is set to 'Enabled: Disable Authenticated Proxy usage', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Configure Authenticated Proxy usage for the Connected User Experience and Telemetry service' is set to 'Enabled: Disable Authenticated Proxy usage', value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" |Select-Object DisableEnterpriseAuthProxy
- $pustoy = $pustoy.DisableEnterpriseAuthProxy
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" |Select-Object DisableEnterpriseAuthProxy
+ $policyValue = $policyValue.DisableEnterpriseAuthProxy
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "DCPB" + "18.10.15.3"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Disable OneSettings Downloads' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Disable OneSettings Downloads' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" |Select-Object DisableOneSettingsDownloads
- $pustoy = $pustoy.DisableOneSettingsDownloads
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" |Select-Object DisableOneSettingsDownloads
+ $policyValue = $policyValue.DisableOneSettingsDownloads
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "DCPB" + "18.10.15.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Do not show feedback notifications' is set to 'Enabled, value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Do not show feedback notifications' is set to 'Enabled, value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" |Select-Object DoNotShowFeedbackNotifications
- $pustoy = $pustoy.DoNotShowFeedbackNotifications
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" |Select-Object DoNotShowFeedbackNotifications
+ $policyValue = $policyValue.DoNotShowFeedbackNotifications
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "DCPB" + "18.10.15.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Enable OneSettings Auditing' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Enable OneSettings Auditing' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" |Select-Object EnableOneSettingsAuditing
- $pustoy = $pustoy.EnableOneSettingsAuditing
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" |Select-Object EnableOneSettingsAuditing
+ $policyValue = $policyValue.EnableOneSettingsAuditing
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "DCPB" + "18.10.15.6"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Limit Diagnostic Log Collection is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Limit Diagnostic Log Collection is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" |Select-Object LimitDiagnosticLogCollection
- $pustoy = $pustoy.LimitDiagnosticLogCollection
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" |Select-Object LimitDiagnosticLogCollection
+ $policyValue = $policyValue.LimitDiagnosticLogCollection
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "DCPB" + "18.10.15.7"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Limit Dump Collection' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Limit Dump Collection' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" |Select-Object LimitDumpCollection
- $pustoy = $pustoy.LimitDumpCollection
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" |Select-Object LimitDumpCollection
+ $policyValue = $policyValue.LimitDumpCollection
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "DCPB" + "18.10.15.8"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Toggle user control over Insider builds'is set to 'Disabled, value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Toggle user control over Insider builds'is set to 'Disabled, value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PreviewBuilds"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PreviewBuilds" |Select-Object AllowBuildPreview
- $pustoy = $pustoy.AllowBuildPreview
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PreviewBuilds" |Select-Object AllowBuildPreview
+ $policyValue = $policyValue.AllowBuildPreview
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 Write-Host "#########>Begin Delivery Optimization audit<#########" -ForegroundColor DarkGreen
 
 $id = "DO" + "18.10.16"
-$nulevoy = "$id" + ";" + "Ensure 'Download Mode' is NOT set to 'Enabled: Internet' , value must be anything other than 3" + ";"
+$outputLine = "$id" + ";" + "Ensure 'Download Mode' is NOT set to 'Enabled: Internet' , value must be anything other than 3" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" |Select-Object DODownloadMode
- $pustoy = $pustoy.DODownloadMode
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" |Select-Object DODownloadMode
+ $policyValue = $policyValue.DODownloadMode
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin Desktop App Installer audit<#########" -ForegroundColor DarkGreen
 
 $id = "DAI" + "18.10.17.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Enable App Installer' is set to 'Disabled, value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Enable App Installer' is set to 'Disabled, value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppInstaller"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppInstaller" |Select-Object EnableAppInstaller
- $pustoy = $pustoy.EnableAppInstaller
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppInstaller" |Select-Object EnableAppInstaller
+ $policyValue = $policyValue.EnableAppInstaller
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "DAI" + "18.10.17.2"
-$nulevoy = "$id" + ";" + "Ensure Ensure 'Enable App Installer Experimental Features' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "Ensure Ensure 'Enable App Installer Experimental Features' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppInstaller"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppInstaller" |Select-Object EnableExperimentalFeatures
- $pustoy = $pustoy.EnableExperimentalFeatures
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppInstaller" |Select-Object EnableExperimentalFeatures
+ $policyValue = $policyValue.EnableExperimentalFeatures
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "DAI" + "18.10.17.3"
-$nulevoy = "$id" + ";" + "Ensure Ensure 'Enable App Installer Hash Override' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "Ensure Ensure 'Enable App Installer Hash Override' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppInstaller"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppInstaller" |Select-Object EnableHashOverride
- $pustoy = $pustoy.EnableHashOverride
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppInstaller" |Select-Object EnableHashOverride
+ $policyValue = $policyValue.EnableHashOverride
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "DAI" + "18.10.17.4"
-$nulevoy = "$id" + ";" + "Ensure Ensure 'Enable App Installer Hash Override' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "Ensure Ensure 'Enable App Installer Hash Override' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppInstaller"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppInstaller" |Select-Object EnableMSAppInstallerProtocol
- $pustoy = $pustoy.EnableMSAppInstallerProtocol
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppInstaller" |Select-Object EnableMSAppInstallerProtocol
+ $policyValue = $policyValue.EnableMSAppInstallerProtocol
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Application Log audit<#########" -ForegroundColor DarkGreen
@@ -7368,104 +6546,92 @@ Write-Host "#########>Begin Application Log audit<#########" -ForegroundColor Da
 
 
 $id = "APP" + "18.10.26.1.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Application: Control Event Log behavior when the log file reaches its maximum size' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Application: Control Event Log behavior when the log file reaches its maximum size' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Application"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Application" |Select-Object Retention
- $pustoy = $pustoy.Retention
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Application" |Select-Object Retention
+ $policyValue = $policyValue.Retention
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "APP" + "18.10.26.1.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Application: Specify the maximum log file size (KB)' is set to 'Enabled: 32,768 or greater', value must be 32,768 or greater " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Application: Specify the maximum log file size (KB)' is set to 'Enabled: 32,768 or greater', value must be 32,768 or greater " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Application"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Application" |Select-Object MaxSize
- $pustoy = $pustoy.MaxSize
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Application" |Select-Object MaxSize
+ $policyValue = $policyValue.MaxSize
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Security Log audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "SECL" + "18.10.26.2.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Security: Control Event Log behavior when the log file reaches its maximum size' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Security: Control Event Log behavior when the log file reaches its maximum size' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Security" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Security" |Select-Object Retention
- $pustoy = $pustoy.Retention
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Security" |Select-Object Retention
+ $policyValue = $policyValue.Retention
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "SECL" + "18.10.26.2.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Security: Specify the maximum log file size (KB)' is set to 'Enabled: 196,608 or greater', value must be 196,608 or greater " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Security: Specify the maximum log file size (KB)' is set to 'Enabled: 196,608 or greater', value must be 196,608 or greater " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Security"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Security" |Select-Object MaxSize
- $pustoy = $pustoy.MaxSize
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Security" |Select-Object MaxSize
+ $policyValue = $policyValue.MaxSize
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin Setup Log audit<#########" -ForegroundColor DarkGreen
 
 
 
 $id = "SETL" + "18.10.26.3.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Setup: Control Event Log behavior when the log file reaches its maximum size' is set to 'Disabled, value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Setup: Control Event Log behavior when the log file reaches its maximum size' is set to 'Disabled, value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Setup"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Setup" |Select-Object Retention
- $pustoy = $pustoy.Retention
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Setup" |Select-Object Retention
+ $policyValue = $policyValue.Retention
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "SETL" + "18.10.26.3.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Setup: Specify the maximum log file size (KB)' is set to 'Enabled: 32,768 or greater', value must be 32,768 or greater " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Setup: Specify the maximum log file size (KB)' is set to 'Enabled: 32,768 or greater', value must be 32,768 or greater " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Setup" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Setup" |Select-Object MaxSize
- $pustoy = $pustoy.MaxSize
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\Setup" |Select-Object MaxSize
+ $policyValue = $policyValue.MaxSize
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -7475,122 +6641,108 @@ Write-Host "#########>Begin System Log audit<#########" -ForegroundColor DarkGre
 
 $id = "SYSL" + "18.10.26.4.1"
 
-$nulevoy = "$id" + ";" + "(L1)Ensure 'System: Control Event Log behavior when the log file reaches its maximum size' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'System: Control Event Log behavior when the log file reaches its maximum size' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\System" |Select-Object Retention
- $pustoy = $pustoy.Retention
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\System" |Select-Object Retention
+ $policyValue = $policyValue.Retention
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "SYSL" + "18.10.26.4.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'System: Specify the maximum log file size (KB)' is set to 'Enabled: 32,768 or greater', value must be 32,768 or greater " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'System: Specify the maximum log file size (KB)' is set to 'Enabled: 32,768 or greater', value must be 32,768 or greater " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\System" |Select-Object MaxSize
- $pustoy = $pustoy.MaxSize
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\System" |Select-Object MaxSize
+ $policyValue = $policyValue.MaxSize
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin File Explorer audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "FE" + "18.10.29.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn off Data Execution Prevention for Explorer' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn off Data Execution Prevention for Explorer' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer" |Select-Object NoDataExecutionPrevention
- $pustoy = $pustoy.NoDataExecutionPrevention
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer" |Select-Object NoDataExecutionPrevention
+ $policyValue = $policyValue.NoDataExecutionPrevention
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 $id = "FE" + "18.10.29.3"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Turn off files from Office.com in Quick access view' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Turn off files from Office.com in Quick access view' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer" |Select-Object DisableGraphRecentItems
- $pustoy = $pustoy.DisableGraphRecentItems
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer" |Select-Object DisableGraphRecentItems
+ $policyValue = $policyValue.DisableGraphRecentItems
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 $id = "FE" + "18.10.29.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn off heap termination on corruption' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn off heap termination on corruption' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer" |Select-Object NoHeapTerminationOnCorruption
- $pustoy = $pustoy.NoHeapTerminationOnCorruption
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer" |Select-Object NoHeapTerminationOnCorruption
+ $policyValue = $policyValue.NoHeapTerminationOnCorruption
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "FE" + "18.10.29.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn off shell protocol protected mode' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn off shell protocol protected mode' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" |Select-Object PreXPSP2ShellProtocolBehavior
- $pustoy = $pustoy.PreXPSP2ShellProtocolBehavior
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" |Select-Object PreXPSP2ShellProtocolBehavior
+ $policyValue = $policyValue.PreXPSP2ShellProtocolBehavior
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin HomeGroup audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "HOME" + "18.10.33.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prevent the computer from joining a homegroup' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prevent the computer from joining a homegroup' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\HomeGroup"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\HomeGroup" |Select-Object DisableHomeGroup
- $pustoy = $pustoy.DisableHomeGroup
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\HomeGroup" |Select-Object DisableHomeGroup
+ $policyValue = $policyValue.DisableHomeGroup
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -7599,428 +6751,378 @@ Write-Host "#########>Begin Windows Location Provider audit<#########" -Foregrou
 
 
 $id = "WLP" + "18.10.37.2"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Turn off location' is set to 'Enabled'', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Turn off location' is set to 'Enabled'', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors" |Select-Object DisableLocation
- $pustoy = $pustoy.DisableLocation
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors" |Select-Object DisableLocation
+ $policyValue = $policyValue.DisableLocation
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin Messaging audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "MES" + "18.10.41.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Allow Message Service Cloud Sync' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Allow Message Service Cloud Sync' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Messaging" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Messaging" |Select-Object AllowMessageSync
- $pustoy = $pustoy.AllowMessageSync
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Messaging" |Select-Object AllowMessageSync
+ $policyValue = $policyValue.AllowMessageSync
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Microsoft account audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "MA" + "18.10.42.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Block all consumer Microsoft account user authentication' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Block all consumer Microsoft account user authentication' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\MicrosoftAccount" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\MicrosoftAccount" |Select-Object DisableUserAuth
- $pustoy = $pustoy.DisableUserAuth
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\MicrosoftAccount" |Select-Object DisableUserAuth
+ $policyValue = $policyValue.DisableUserAuth
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Microsoft Defender Antivirus <#########" -ForegroundColor DarkGreen
 $id = "MDA" + "18.10.43.5.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure local setting override for reporting to Microsoft MAPS' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure local setting override for reporting to Microsoft MAPS' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet" |Select-Object LocalSettingOverrideSpynetReporting
- $pustoy = $pustoy.LocalSettingOverrideSpynetReporting
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet" |Select-Object LocalSettingOverrideSpynetReporting
+ $policyValue = $policyValue.LocalSettingOverrideSpynetReporting
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "MDA" + "18.10.43.5.2"
-$nulevoy = "$id" + ";" + " (L2)Ensure 'Join Microsoft MAPS' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + " (L2)Ensure 'Join Microsoft MAPS' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet" |Select-Object SpynetReporting
- $pustoy = $pustoy.SpynetReporting
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet" |Select-Object SpynetReporting
+ $policyValue = $policyValue.SpynetReporting
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "MDA" + "18.10.43.6.1.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure Attack Surface Reduction rules' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure Attack Surface Reduction rules' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR" |Select-Object ExploitGuard_ASR_Rules
- $pustoy = $pustoy.ExploitGuard_ASR_Rules
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR" |Select-Object ExploitGuard_ASR_Rules
+ $policyValue = $policyValue.ExploitGuard_ASR_Rules
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "MDA" + "18.10.43.6.1.2"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Configure Attack Surface Reduction rules: Set the state for each ASR rule' is 'configured', value must be 1 foreach key " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Configure Attack Surface Reduction rules: Set the state for each ASR rule' is 'configured', value must be 1 foreach key " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules" |Select-Object "75668c1f-73b5-4cf0-bb93-3ecf5cb7cc84"
- $pustoy = $pustoy."75668c1f-73b5-4cf0-bb93-3ecf5cb7cc84"
- $pustoytemp = "Block Office applications from injecting code into other processes" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules" |Select-Object "3b576869-a4ec-4529-8536-b80a7769e899"
- $pustoy = $pustoy."3b576869-a4ec-4529-8536-b80a7769e899"
- $pustoytemp += "Block Office applications from creating executable content" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules" |Select-Object "d4f940ab-401b-4efc-aadc-ad5f3c50688a"
- $pustoy = $pustoy."d4f940ab-401b-4efc-aadc-ad5f3c50688a"
- $pustoytemp += "Block Office applications from creating child processes" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules" |Select-Object "92e97fa1-2edf-4476-bdd6-9dd0b4dddc7b"
- $pustoy = $pustoy."92e97fa1-2edf-4476-bdd6-9dd0b4dddc7b"
- $pustoytemp += "Block Win32 API calls from Office macro" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules" |Select-Object "5beb7efe-fd9a-4556-801d-275e5ffc04cc"
- $pustoy = $pustoy."5beb7efe-fd9a-4556-801d-275e5ffc04cc"
- $pustoytemp += "Block execution of potentially obfuscated scripts" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules" |Select-Object "d3e037e1-3eb8-44c8-a917-57927947596d"
- $pustoy = $pustoy."d3e037e1-3eb8-44c8-a917-57927947596d"
- $pustoytemp += "Block JavaScript or VBScript from launching downloaded executable content" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules" |Select-Object "be9ba2d9-53ea-4cdc-84e5-9b1eeee46550"
- $pustoy = $pustoy."be9ba2d9-53ea-4cdc-84e5-9b1eeee46550"
- $pustoytemp += "Block executable content from email client and webmail" + ":" + "$pustoy" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules" |Select-Object "75668c1f-73b5-4cf0-bb93-3ecf5cb7cc84"
+ $policyValue = $policyValue."75668c1f-73b5-4cf0-bb93-3ecf5cb7cc84"
+ $policyValueBuffer = "Block Office applications from injecting code into other processes" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules" |Select-Object "3b576869-a4ec-4529-8536-b80a7769e899"
+ $policyValue = $policyValue."3b576869-a4ec-4529-8536-b80a7769e899"
+ $policyValueBuffer += "Block Office applications from creating executable content" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules" |Select-Object "d4f940ab-401b-4efc-aadc-ad5f3c50688a"
+ $policyValue = $policyValue."d4f940ab-401b-4efc-aadc-ad5f3c50688a"
+ $policyValueBuffer += "Block Office applications from creating child processes" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules" |Select-Object "92e97fa1-2edf-4476-bdd6-9dd0b4dddc7b"
+ $policyValue = $policyValue."92e97fa1-2edf-4476-bdd6-9dd0b4dddc7b"
+ $policyValueBuffer += "Block Win32 API calls from Office macro" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules" |Select-Object "5beb7efe-fd9a-4556-801d-275e5ffc04cc"
+ $policyValue = $policyValue."5beb7efe-fd9a-4556-801d-275e5ffc04cc"
+ $policyValueBuffer += "Block execution of potentially obfuscated scripts" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules" |Select-Object "d3e037e1-3eb8-44c8-a917-57927947596d"
+ $policyValue = $policyValue."d3e037e1-3eb8-44c8-a917-57927947596d"
+ $policyValueBuffer += "Block JavaScript or VBScript from launching downloaded executable content" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules" |Select-Object "be9ba2d9-53ea-4cdc-84e5-9b1eeee46550"
+ $policyValue = $policyValue."be9ba2d9-53ea-4cdc-84e5-9b1eeee46550"
+ $policyValueBuffer += "Block executable content from email client and webmail" + ":" + "$policyValue" + "|"
  }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoytemp
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValueBuffer
+$outputLine>> $fname
 
 
 $id = "MDA" + "18.10.43.6.3.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prevent users and apps from accessing dangerous websites' is set to 'Enabled: Block', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prevent users and apps from accessing dangerous websites' is set to 'Enabled: Block', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\Network Protection"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\Network Protection" |Select-Object EnableNetworkProtection
- $pustoy = $pustoy.EnableNetworkProtection
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\Network Protection" |Select-Object EnableNetworkProtection
+ $policyValue = $policyValue.EnableNetworkProtection
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "MDA" + "18.10.43.6.3.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Enable file hash computation feature' is set to 'Enabled' value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Enable file hash computation feature' is set to 'Enabled' value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\MpEngine"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\MpEngine" |Select-Object EnableFileHashComputation
- $pustoy = $pustoy.EnableFileHashComputation
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\MpEngine" |Select-Object EnableFileHashComputation
+ $policyValue = $policyValue.EnableFileHashComputation
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "MDA" + "18.10.43.10.1"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Scan all downloaded files and attachments' is set to 'Enabled', value must be 1 or disable if you have another EPP" + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Scan all downloaded files and attachments' is set to 'Enabled', value must be 1 or disable if you have another EPP" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" |Select-Object DisableIOAVProtection
- $pustoy = $pustoy.DisableIOAVProtection
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" |Select-Object DisableIOAVProtection
+ $policyValue = $policyValue.DisableIOAVProtection
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "MDA" + "18.10.43.10.2"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Turn off real-time protection' is set to 'Disabled' (Automated), value must be 0 or disable if you have another EPP" + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Turn off real-time protection' is set to 'Disabled' (Automated), value must be 0 or disable if you have another EPP" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" |Select-Object DisableRealtimeMonitoring
- $pustoy = $pustoy.DisableRealtimeMonitoring
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" |Select-Object DisableRealtimeMonitoring
+ $policyValue = $policyValue.DisableRealtimeMonitoring
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "MDA" + "18.10.43.10.3"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Turn on behavior monitoring' is set to 'Enabled', value must be 0  or disable if you have another EPP " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Turn on behavior monitoring' is set to 'Enabled', value must be 0  or disable if you have another EPP " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" |Select-Object DisableBehaviorMonitoring
- $pustoy = $pustoy.DisableBehaviorMonitoring
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" |Select-Object DisableBehaviorMonitoring
+ $policyValue = $policyValue.DisableBehaviorMonitoring
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "MDA" + "18.10.43.10.4"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Turn on script scanning' is set to 'Enabled', value must be 0  or disable if you have another EPP " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Turn on script scanning' is set to 'Enabled', value must be 0  or disable if you have another EPP " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" |Select-Object DisableScriptScanning
- $pustoy = $pustoy.DisableScriptScanning
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" |Select-Object DisableScriptScanning
+ $policyValue = $policyValue.DisableScriptScanning
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "MDA" + "18.10.43.12.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Configure Watson events' is set to 'Disabled, value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Configure Watson events' is set to 'Disabled, value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Reporting"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Reporting" |Select-Object DisableGenericRePorts
- $pustoy = $pustoy.DisableGenericRePorts
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Reporting" |Select-Object DisableGenericRePorts
+ $policyValue = $policyValue.DisableGenericRePorts
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 
 $id = "MDA" + "18.10.43.13.1"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Scan removable drives' is set to 'Enabled', value must be 0 or disable if you have another EPP" + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Scan removable drives' is set to 'Enabled', value must be 0 or disable if you have another EPP" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Scan"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Scan" |Select-Object DisableRemovableDriveScanning
- $pustoy = $pustoy.DisableRemovableDriveScanning
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Scan" |Select-Object DisableRemovableDriveScanning
+ $policyValue = $policyValue.DisableRemovableDriveScanning
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "MDA" + "18.10.43.13.2"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Turn on e-mail scanning' is set to 'Enabled', value must be 0 or disable if you have another EPP" + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Turn on e-mail scanning' is set to 'Enabled', value must be 0 or disable if you have another EPP" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Scan"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Scan" |Select-Object DisableEmailScanning
- $pustoy = $pustoy.DisableEmailScanning
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Scan" |Select-Object DisableEmailScanning
+ $policyValue = $policyValue.DisableEmailScanning
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "MDA" + "18.10.43.16"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Configure detection for potentially unwanted applications' is set to 'Enabled: Block', value must be 1 or disable if you have another EPP " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Configure detection for potentially unwanted applications' is set to 'Enabled: Block', value must be 1 or disable if you have another EPP " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender" |Select-Object PUAProtection
- $pustoy = $pustoy.PUAProtection
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender" |Select-Object PUAProtection
+ $policyValue = $policyValue.PUAProtection
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "MDA" + "18.10.43.17"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn off Windows Defender AntiVirus' is set to 'Disabled', value must be 0 or disable if you have another EPP" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn off Windows Defender AntiVirus' is set to 'Disabled', value must be 0 or disable if you have another EPP" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender" |Select-Object DisableAntiSpyware
- $pustoy = $pustoy.DisableAntiSpyware
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender" |Select-Object DisableAntiSpyware
+ $policyValue = $policyValue.DisableAntiSpyware
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "MDA" + "18.10.44.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow auditing events in Windows Defender Application Guard' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow auditing events in Windows Defender Application Guard' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI" |Select-Object AuditApplicationGuard
- $pustoy = $pustoy.AuditApplicationGuard
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI" |Select-Object AuditApplicationGuard
+ $policyValue = $policyValue.AuditApplicationGuard
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 
 $id = "MDA" + "18.10.44.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow camera and microphone access in Windows Defender Application Guard' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow camera and microphone access in Windows Defender Application Guard' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI" |Select-Object AllowCameraMicrophoneRedirection
- $pustoy = $pustoy.AllowCameraMicrophoneRedirection
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI" |Select-Object AllowCameraMicrophoneRedirection
+ $policyValue = $policyValue.AllowCameraMicrophoneRedirection
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "MDA" + "18.10.44.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow data persistence for Windows Defender Application Guard' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow data persistence for Windows Defender Application Guard' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI" |Select-Object AllowPersistence
- $pustoy = $pustoy.AllowPersistence
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI" |Select-Object AllowPersistence
+ $policyValue = $policyValue.AllowPersistence
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "MDA" + "18.10.44.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow files to download and save to the host operating system from Windows Defender Application Guard' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow files to download and save to the host operating system from Windows Defender Application Guard' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI" |Select-Object SaveFilesToHost
- $pustoy = $pustoy.SaveFilesToHost
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI" |Select-Object SaveFilesToHost
+ $policyValue = $policyValue.SaveFilesToHost
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "MDA" + "18.10.44.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure Windows Defender Application Guard clipboard settings: Clipboard behavior setting' is set to 'Enabled: Enable clipboard operation from an isolated session to the host', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure Windows Defender Application Guard clipboard settings: Clipboard behavior setting' is set to 'Enabled: Enable clipboard operation from an isolated session to the host', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI" |Select-Object AppHVSIClipboardSettings
- $pustoy = $pustoy.AppHVSIClipboardSettings
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI" |Select-Object AppHVSIClipboardSettings
+ $policyValue = $policyValue.AppHVSIClipboardSettings
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "MDA" + "18.10.44.6"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn on Windows Defender Application Guard in Enterprise Mode' is set to 'Enabled', value must be 3 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn on Windows Defender Application Guard in Enterprise Mode' is set to 'Enabled', value must be 3 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI" |Select-Object AllowAppHVSI_ProviderSet
- $pustoy = $pustoy.AllowAppHVSI_ProviderSet
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\AppHVSI" |Select-Object AllowAppHVSI_ProviderSet
+ $policyValue = $policyValue.AllowAppHVSI_ProviderSet
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin News and interests audit<#########" -ForegroundColor DarkGreen
 
 $id = "NI" + "18.10.50.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Enable news and interests on the taskbar' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Enable news and interests on the taskbar' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Feeds:"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Feeds:" |Select-Object EnableFeeds
- $pustoy = $pustoy.EnableFeeds
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Feeds:" |Select-Object EnableFeeds
+ $policyValue = $policyValue.EnableFeeds
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin OneDrive audit<#########" -ForegroundColor DarkGreen
@@ -8028,20 +7130,18 @@ Write-Host "#########>Begin OneDrive audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "OD" + "18.10.50.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prevent the usage of OneDrive for file storage' is set to 'Enabled'', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prevent the usage of OneDrive for file storage' is set to 'Enabled'', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\OneDrive"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\OneDrive" |Select-Object DisableFileSyncNGSC
- $pustoy = $pustoy.DisableFileSyncNGSC
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\OneDrive" |Select-Object DisableFileSyncNGSC
+ $policyValue = $policyValue.DisableFileSyncNGSC
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
+$outputLine += $policyValue
+$outputLine>> $fname
 
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
 
 
 Write-Host "#########>Begin Push To Install audit<#########" -ForegroundColor DarkGreen
@@ -8050,316 +7150,276 @@ Write-Host "#########>Begin Push To Install audit<#########" -ForegroundColor Da
 
 
 $id = "PTI" + "18.10.56.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Turn off Push To Install service' is set to 'Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Turn off Push To Install service' is set to 'Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\PushToInstall"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\PushToInstall" |Select-Object DisablePushToInstall
- $pustoy = $pustoy.DisablePushToInstall
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\PushToInstall" |Select-Object DisablePushToInstall
+ $policyValue = $policyValue.DisablePushToInstall
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Remote Desktop Services audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "RDS" + "18.10.57.2.2"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Disable Cloud Clipboard integration for server-to-client data transfer' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Disable Cloud Clipboard integration for server-to-client data transfer' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object DisableCloudClipboardIntegration
- $pustoy = $pustoy.DisableCloudClipboardIntegration
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object DisableCloudClipboardIntegration
+ $policyValue = $policyValue.DisableCloudClipboardIntegration
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDS" + "18.10.57.2.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Do not allow passwords to be saved' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Do not allow passwords to be saved' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object DisablePasswordSaving
- $pustoy = $pustoy.DisablePasswordSaving
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object DisablePasswordSaving
+ $policyValue = $policyValue.DisablePasswordSaving
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDS" + "18.10.57.3.2.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Allow users to connect remotely by using Remote Desktop Services' is set to 'Disabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Allow users to connect remotely by using Remote Desktop Services' is set to 'Disabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fDenyTSConnections
- $pustoy = $pustoy.fDenyTSConnections
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fDenyTSConnections
+ $policyValue = $policyValue.fDenyTSConnections
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDS" + "18.10.57.3.3.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Allow UI Automation redirection' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Allow UI Automation redirection' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object EnableUiaRedirection
- $pustoy = $pustoy.EnableUiaRedirection
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object EnableUiaRedirection
+ $policyValue = $policyValue.EnableUiaRedirection
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "RDS" + "18.10.57.3.3.2"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Do not allow COM port redirection' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Do not allow COM port redirection' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fDisableCcm
- $pustoy = $pustoy.fDisableCcm
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fDisableCcm
+ $policyValue = $policyValue.fDisableCcm
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "RDS" + "18.10.57.3.3.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Do not allow drive redirection' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Do not allow drive redirection' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fDisableCdm
- $pustoy = $pustoy.fDisableCdm
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fDisableCdm
+ $policyValue = $policyValue.fDisableCdm
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "RDS" + "18.10.57.3.3.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Do not allow location redirection' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Do not allow location redirection' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fDisableLocationRedir
- $pustoy = $pustoy.fDisableLocationRedir
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fDisableLocationRedir
+ $policyValue = $policyValue.fDisableLocationRedir
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "RDS" + "18.10.57.3.3.5"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Do not allow LPT port redirection' is set to 'Enabled'', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Do not allow LPT port redirection' is set to 'Enabled'', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fDisableLPT
- $pustoy = $pustoy.fDisableLPT
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fDisableLPT
+ $policyValue = $policyValue.fDisableLPT
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDS" + "18.10.57.3.3.6"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Do not allow supported Plug and Play device redirection' is set to 'Enabled'', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Do not allow supported Plug and Play device redirection' is set to 'Enabled'', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fDisablePNPRedir
- $pustoy = $pustoy.fDisablePNPRedir
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fDisablePNPRedir
+ $policyValue = $policyValue.fDisablePNPRedir
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "RDS" + "18.10.57.3.3.7"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Do not allow WebAuthn redirection' is set to 'Enabled'', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Do not allow WebAuthn redirection' is set to 'Enabled'', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fDisableWebAuthn
- $pustoy = $pustoy.fDisableWebAuthn
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fDisableWebAuthn
+ $policyValue = $policyValue.fDisableWebAuthn
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "RDS" + "18.10.57.3.9.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Always prompt for password upon connection' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Always prompt for password upon connection' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fPromptForPassword
- $pustoy = $pustoy.fPromptForPassword
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fPromptForPassword
+ $policyValue = $policyValue.fPromptForPassword
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDS" + "18.10.57.3.9.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Require secure RPC communication' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Require secure RPC communication' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fEncryptRPCTraffic
- $pustoy = $pustoy.fEncryptRPCTraffic
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fEncryptRPCTraffic
+ $policyValue = $policyValue.fEncryptRPCTraffic
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDS" + "18.10.57.3.9.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Require secure RPC communication' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Require secure RPC communication' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fEncryptRPCTraffic
- $pustoy = $pustoy.fEncryptRPCTraffic
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object fEncryptRPCTraffic
+ $policyValue = $policyValue.fEncryptRPCTraffic
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "RDS" + "18.10.57.3.9.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Require use of specific security layer for remote (RDP) connections' is set to 'Enabled: SSL', value must be 2 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Require use of specific security layer for remote (RDP) connections' is set to 'Enabled: SSL', value must be 2 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object SecurityLayer
- $pustoy = $pustoy.SecurityLayer
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object SecurityLayer
+ $policyValue = $policyValue.SecurityLayer
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDS" + "18.10.57.3.9.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Require user authentication for remote connections by using Network Level Authentication' is set to 'Enabled'', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Require user authentication for remote connections by using Network Level Authentication' is set to 'Enabled'', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object UserAuthentication
- $pustoy = $pustoy.UserAuthentication
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object UserAuthentication
+ $policyValue = $policyValue.UserAuthentication
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDS" + "18.10.57.3.9.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Set client connection encryption level' is set to 'Enabled: High Level', value must be 3 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Set client connection encryption level' is set to 'Enabled: High Level', value must be 3 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object MinEncryptionLevel
- $pustoy = $pustoy.MinEncryptionLevel
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object MinEncryptionLevel
+ $policyValue = $policyValue.MinEncryptionLevel
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDS" + "18.10.57.3.10.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Set time limit for active but idle Remote Desktop Services sessions' is set to 'Enabled: 15 minutes or less', value must be 15 or less " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Set time limit for active but idle Remote Desktop Services sessions' is set to 'Enabled: 15 minutes or less', value must be 15 or less " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object MaxIdleTime
- $pustoy = $pustoy.MaxIdleTime
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object MaxIdleTime
+ $policyValue = $policyValue.MaxIdleTime
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDS" + "18.10.57.3.10.2"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Set time limit for disconnected sessions' is set to 'Enabled: 1 minute', value must 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Set time limit for disconnected sessions' is set to 'Enabled: 1 minute', value must 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object MaxDisconnectionTime
- $pustoy = $pustoy.MaxDisconnectionTime
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object MaxDisconnectionTime
+ $policyValue = $policyValue.MaxDisconnectionTime
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "RDS" + "18.10.57.3.11.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Do not delete temp folders upon exit' is set to 'Disabled', value must 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Do not delete temp folders upon exit' is set to 'Disabled', value must 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object DeleteTempDirsOnExit
- $pustoy = $pustoy.DeleteTempDirsOnExit
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" |Select-Object DeleteTempDirsOnExit
+ $policyValue = $policyValue.DeleteTempDirsOnExit
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin RSS Feeds audit<#########" -ForegroundColor DarkGreen
@@ -8368,19 +7428,17 @@ Write-Host "#########>Begin RSS Feeds audit<#########" -ForegroundColor DarkGree
 
 
 $id = "RSS" + "18.10.58.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prevent downloading of enclosures' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prevent downloading of enclosures' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Internet Explorer\Feeds"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Internet Explorer\Feeds" |Select-Object DisableEnclosureDownload
- $pustoy = $pustoy.DisableEnclosureDownload
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Internet Explorer\Feeds" |Select-Object DisableEnclosureDownload
+ $policyValue = $policyValue.DisableEnclosureDownload
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin OCR audit<#########" -ForegroundColor DarkGreen
@@ -8389,95 +7447,83 @@ Write-Host "#########>Begin OCR audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "OCR" + "18.10.59.2"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Allow Cloud Search' is set to 'Enabled: Disable Cloud Search', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Allow Cloud Search' is set to 'Enabled: Disable Cloud Search', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" |Select-Object AllowCloudSearch
- $pustoy = $pustoy.AllowCloudSearch
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" |Select-Object AllowCloudSearch
+ $policyValue = $policyValue.AllowCloudSearch
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "OCR" + "18.10.59.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow Cortana' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow Cortana' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" |Select-Object AllowCortana
- $pustoy = $pustoy.AllowCortana
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" |Select-Object AllowCortana
+ $policyValue = $policyValue.AllowCortana
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "OCR" + "18.10.59.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow Cortana above lock screen' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow Cortana above lock screen' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" |Select-Object AllowCortanaAboveLock
- $pustoy = $pustoy.AllowCortanaAboveLock
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" |Select-Object AllowCortanaAboveLock
+ $policyValue = $policyValue.AllowCortanaAboveLock
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "OCR" + "18.10.59.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow indexing of encrypted files' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow indexing of encrypted files' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" |Select-Object AllowIndexingEncryptedStoresOrItems
- $pustoy = $pustoy.AllowIndexingEncryptedStoresOrItems
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" |Select-Object AllowIndexingEncryptedStoresOrItems
+ $policyValue = $policyValue.AllowIndexingEncryptedStoresOrItems
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "OCR" + "18.10.59.6"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow search and Cortana to use location' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow search and Cortana to use location' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" |Select-Object AllowSearchToUseLocation
- $pustoy = $pustoy.AllowSearchToUseLocation
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" |Select-Object AllowSearchToUseLocation
+ $policyValue = $policyValue.AllowSearchToUseLocation
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "OCR" + "18.10.59.7"
-$nulevoy = "$id" + ";" + "(L2)'Ensure 'Allow search highlights' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2)'Ensure 'Allow search highlights' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" |Select-Object EnableDynamicContentInWSB
- $pustoy = $pustoy.EnableDynamicContentInWSB
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" |Select-Object EnableDynamicContentInWSB
+ $policyValue = $policyValue.EnableDynamicContentInWSB
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -8488,254 +7534,224 @@ Write-Host "#########>Begin Software Protection Platform audit<#########" -Foreg
 
 
 $id = "SPP" + "18.10.63.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Turn off KMS Client Online AVS Validation' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Turn off KMS Client Online AVS Validation' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\CurrentVersion\Software Protection Platform" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\CurrentVersion\Software Protection Platform" |Select-Object NoGenTicket
- $pustoy = $pustoy.NoGenTicket
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\CurrentVersion\Software Protection Platform" |Select-Object NoGenTicket
+ $policyValue = $policyValue.NoGenTicket
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin Store audit<#########" -ForegroundColor DarkGreen
 
 
 
 $id = "STORE" + "18.10.66.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Disable all apps from Windows Store' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Disable all apps from Windows Store' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore" |Select-Object DisableStoreApps
- $pustoy = $pustoy.DisableStoreApps
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore" |Select-Object DisableStoreApps
+ $policyValue = $policyValue.DisableStoreApps
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "STORE" + "18.10.66.2"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Only display the private store within the Microsoft Store' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Only display the private store within the Microsoft Store' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore" |Select-Object RequirePrivateStoreOnly
- $pustoy = $pustoy.RequirePrivateStoreOnly
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore" |Select-Object RequirePrivateStoreOnly
+ $policyValue = $policyValue.RequirePrivateStoreOnly
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "STORE" + "18.10.66.3"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Turn off Automatic Download and Install of updates' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Turn off Automatic Download and Install of updates' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore" |Select-Object AutoDownload
- $pustoy = $pustoy.AutoDownload
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore" |Select-Object AutoDownload
+ $policyValue = $policyValue.AutoDownload
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "STORE" + "18.10.66.4"
-$nulevoy = "$id" + ";" + " (L1)Ensure 'Turn off the offer to update to the latest version of Windows' is set to 'Enabled, value must be 1 " + ";"
+$outputLine = "$id" + ";" + " (L1)Ensure 'Turn off the offer to update to the latest version of Windows' is set to 'Enabled, value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore" |Select-Object DisableOSUpgrade
- $pustoy = $pustoy.DisableOSUpgrade
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore" |Select-Object DisableOSUpgrade
+ $policyValue = $policyValue.DisableOSUpgrade
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "STORE" + "18.10.66.5"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Turn off the Store application' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Turn off the Store application' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore" |Select-Object RemoveWindowsStore
- $pustoy = $pustoy.RemoveWindowsStore
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore" |Select-Object RemoveWindowsStore
+ $policyValue = $policyValue.RemoveWindowsStore
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin Widgets audit<#########" -ForegroundColor DarkGreen
 
 $id = "WID" + "18.10.72.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow widgets' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow widgets' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Dsh"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Dsh" |Select-Object AllowNewsAndInterests
- $pustoy = $pustoy.AllowNewsAndInterests
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Dsh" |Select-Object AllowNewsAndInterests
+ $policyValue = $policyValue.AllowNewsAndInterests
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Windows Defender SmartScreen audit<#########" -ForegroundColor DarkGreen
 
 $id = "WDS" + "18.10.72.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Notify Malicious' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Notify Malicious' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WTDS\Components"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WTDS\Components" |Select-Object NotifyMalicious
- $pustoy = $pustoy.NotifyMalicious
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WTDS\Components" |Select-Object NotifyMalicious
+ $policyValue = $policyValue.NotifyMalicious
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "WDS" + "18.10.72.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Notify Password Reuse' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Notify Password Reuse' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WTDS\Components"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WTDS\Components" |Select-Object NotifyPasswordReuse
- $pustoy = $pustoy.NotifyPasswordReuse
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WTDS\Components" |Select-Object NotifyPasswordReuse
+ $policyValue = $policyValue.NotifyPasswordReuse
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "WDS" + "18.10.72.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Notify Unsafe App'''' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Notify Unsafe App'''' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WTDS\Components"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WTDS\Components" |Select-Object NotifyUnsafeApp
- $pustoy = $pustoy.NotifyUnsafeApp
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WTDS\Components" |Select-Object NotifyUnsafeApp
+ $policyValue = $policyValue.NotifyUnsafeApp
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "WDS" + "18.10.72.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Service Enabled' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Service Enabled' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WTDS\Components"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WTDS\Components" |Select-Object ServiceEnabled
- $pustoy = $pustoy.ServiceEnabled
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WTDS\Components" |Select-Object ServiceEnabled
+ $policyValue = $policyValue.ServiceEnabled
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "WDS" + "18.10.76.2.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure Windows Defender SmartScreen' is set to 'Enabled: Warn and prevent bypass, value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure Windows Defender SmartScreen' is set to 'Enabled: Warn and prevent bypass, value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object EnableSmartScreen
- $pustoy = $pustoy.EnableSmartScreen
- $pustoytemp = "EnableSmartScreen" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object ShellSmartScreenLevel
- $pustoy = $pustoy.ShellSmartScreenLevel
- $pustoytemp += "ShellSmartScreenLevel" + ":" + "$pustoy" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object EnableSmartScreen
+ $policyValue = $policyValue.EnableSmartScreen
+ $policyValueBuffer = "EnableSmartScreen" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" |Select-Object ShellSmartScreenLevel
+ $policyValue = $policyValue.ShellSmartScreenLevel
+ $policyValueBuffer += "ShellSmartScreenLevel" + ":" + "$policyValue" + "|"
 
  
 }
 else {
- $pustoytemp = "no configuration"
+ $policyValueBuffer = "no configuration"
 }
-$nulevoy += $pustoytemp
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValueBuffer
+$outputLine>> $fname
 
 Write-Host "#########>Begin Microsoft Edge audit<#########" -ForegroundColor DarkGreen
 
 $id = "ME" + "18.10.76.3.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure Configure Windows Defender SmartScreen is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Configure Windows Defender SmartScreen is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\MicrosoftEdge\PhishingFilter"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\MicrosoftEdge\PhishingFilter" |Select-Object EnabledV9
- $pustoy = $pustoy.EnabledV9
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\MicrosoftEdge\PhishingFilter" |Select-Object EnabledV9
+ $policyValue = $policyValue.EnabledV9
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "ME" + "18.10.76.3.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure Prevent bypassing Windows Defender SmartScreen prompts for sites is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure Prevent bypassing Windows Defender SmartScreen prompts for sites is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\MicrosoftEdge\PhishingFilter"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\MicrosoftEdge\PhishingFilter" |Select-Object PreventOverride
- $pustoy = $pustoy.PreventOverride
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\MicrosoftEdge\PhishingFilter" |Select-Object PreventOverride
+ $policyValue = $policyValue.PreventOverride
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin Windows Game Recording and Broadcasting audit<#########" -ForegroundColor DarkGreen
 
 
 
 $id = "WGRB" + "18.10.78.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Enables or disables Windows Game Recording and Broadcasting' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Enables or disables Windows Game Recording and Broadcasting' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\GameDVR"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\GameDVR" |Select-Object AllowGameDVR
- $pustoy = $pustoy.AllowGameDVR
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\GameDVR" |Select-Object AllowGameDVR
+ $policyValue = $policyValue.AllowGameDVR
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Windows Hello for Business audit<#########" -ForegroundColor DarkGreen
@@ -8743,19 +7759,17 @@ Write-Host "#########>Begin Windows Hello for Business audit<#########" -Foregro
 
 
 $id = "WGRB" + "18.10.78.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Enable ESS with Supported Peripherals' is set to 'Enabled: 1', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Enable ESS with Supported Peripherals' is set to 'Enabled: 1', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Policies\PassportForWork\Biometrics"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Policies\PassportForWork\Biometrics" |Select-Object EnableESSwithSupportedPeripherals
- $pustoy = $pustoy.EnableESSwithSupportedPeripherals
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Policies\PassportForWork\Biometrics" |Select-Object EnableESSwithSupportedPeripherals
+ $policyValue = $policyValue.EnableESSwithSupportedPeripherals
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Windows Ink Workspace audit<#########" -ForegroundColor DarkGreen
@@ -8763,35 +7777,31 @@ Write-Host "#########>Begin Windows Ink Workspace audit<#########" -ForegroundCo
 
 
 $id = "WIW" + "18.10.80.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Allow suggested apps in Windows Ink Workspace' is set to 'Disabled, value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Allow suggested apps in Windows Ink Workspace' is set to 'Disabled, value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\WindowsInkWorkspace"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsInkWorkspace" |Select-Object AllowSuggestedAppsInWindowsInkWorkspace
- $pustoy = $pustoy.AllowSuggestedAppsInWindowsInkWorkspace
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsInkWorkspace" |Select-Object AllowSuggestedAppsInWindowsInkWorkspace
+ $policyValue = $policyValue.AllowSuggestedAppsInWindowsInkWorkspace
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "WIW" + "18.10.80.2"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Allow Windows Ink Workspace' is set to 'Enabled: On, but disallow access above lock' OR 'Disabled' but not 'Enabled: On', value must be 0 or 1 but not 2 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Allow Windows Ink Workspace' is set to 'Enabled: On, but disallow access above lock' OR 'Disabled' but not 'Enabled: On', value must be 0 or 1 but not 2 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\WindowsInkWorkspace"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsInkWorkspace" |Select-Object AllowWindowsInkWorkspace
- $pustoy = $pustoy.AllowWindowsInkWorkspace
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\WindowsInkWorkspace" |Select-Object AllowWindowsInkWorkspace
+ $policyValue = $policyValue.AllowWindowsInkWorkspace
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -8799,88 +7809,78 @@ Write-Host "#########>Begin Windows Installer audit<#########" -ForegroundColor 
 
 
 $id = "WI" + "18.10.81.1"
-$nulevoy = "$id" + ";" + "Ensure 'Allow user control over installs' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "Ensure 'Allow user control over installs' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer" |Select-Object EnableUserControl
- $pustoy = $pustoy.EnableUserControl
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer" |Select-Object EnableUserControl
+ $policyValue = $policyValue.EnableUserControl
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "WI" + "18.10.81.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Always install with elevated privileges' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Always install with elevated privileges' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer" |Select-Object AlwaysInstallElevated
- $pustoy = $pustoy.AlwaysInstallElevated
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer" |Select-Object AlwaysInstallElevated
+ $policyValue = $policyValue.AlwaysInstallElevated
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "WI" + "18.10.81.3"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Prevent Internet Explorer security prompt for Windows Installer scripts' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Prevent Internet Explorer security prompt for Windows Installer scripts' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer" |Select-Object SafeForScripting
- $pustoy = $pustoy.SafeForScripting
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer" |Select-Object SafeForScripting
+ $policyValue = $policyValue.SafeForScripting
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Windows Logon Options audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "WLO" + "18.10.82.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure ''Enable MPR notifications for the system' is set to 'Disabled', value must be 0 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure ''Enable MPR notifications for the system' is set to 'Disabled', value must be 0 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" |Select-Object EnableMPR
- $pustoy = $pustoy.EnableMPR
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" |Select-Object EnableMPR
+ $policyValue = $policyValue.EnableMPR
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 
 
 $id = "WLO" + "18.10.82.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Sign-in last interactive user automatically after a system-initiated restart' is set to 'Disabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Sign-in last interactive user automatically after a system-initiated restart' is set to 'Disabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" |Select-Object DisableAutomaticRestartSignOn
- $pustoy = $pustoy.DisableAutomaticRestartSignOn
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" |Select-Object DisableAutomaticRestartSignOn
+ $policyValue = $policyValue.DisableAutomaticRestartSignOn
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -8889,33 +7889,29 @@ Write-Host "#########>Begin Windows PowerShell audit<#########" -ForegroundColor
 
 
 $id = "WP" + "18.10.87.1"
-$nulevoy = "$id" + ";" + "Ensure 'Turn on PowerShell Script Block Logging' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "Ensure 'Turn on PowerShell Script Block Logging' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" |Select-Object EnableScriptBlockLogging
- $pustoy = $pustoy.EnableScriptBlockLogging
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" |Select-Object EnableScriptBlockLogging
+ $policyValue = $policyValue.EnableScriptBlockLogging
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 $id = "WP" + "18.10.87.2"
-$nulevoy = "$id" + ";" + "Ensure 'urn on PowerShell Transcription' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "Ensure 'urn on PowerShell Transcription' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription" |Select-Object EnableTranscripting
- $pustoy = $pustoy.EnableTranscripting
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription" |Select-Object EnableTranscripting
+ $policyValue = $policyValue.EnableTranscripting
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -8923,167 +7919,147 @@ Write-Host "#########>Begin Windows Remote Management audit<#########" -Foregrou
 
 
 $id = "WRR" + "18.10.89.1.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow Basic authentication' is set to 'Disabled', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow Basic authentication' is set to 'Disabled', value must be 0" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Client"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Client" |Select-Object AllowBasic
- $pustoy = $pustoy.AllowBasic
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Client" |Select-Object AllowBasic
+ $policyValue = $policyValue.AllowBasic
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "WRR" + "18.10.89.1.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow unencrypted traffic' is set to 'Disabled', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow unencrypted traffic' is set to 'Disabled', value must be 0" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Client"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Client" |Select-Object AllowUnencryptedTraffic
- $pustoy = $pustoy.AllowUnencryptedTraffic
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Client" |Select-Object AllowUnencryptedTraffic
+ $policyValue = $policyValue.AllowUnencryptedTraffic
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "WRR" + "18.10.89.1.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Disallow Digest authentication' is set to 'Enabled', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Disallow Digest authentication' is set to 'Enabled', value must be 0" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Client"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Client" |Select-Object AllowDigest
- $pustoy = $pustoy.AllowDigest
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Client" |Select-Object AllowDigest
+ $policyValue = $policyValue.AllowDigest
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 Write-Host "#########>Begin WinRM Service audit<#########" -ForegroundColor DarkGreen
 
 $id = "WRR" + "18.10.89.2.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow Basic authentication' is set to 'Disabled', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow Basic authentication' is set to 'Disabled', value must be 0" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service" |Select-Object AllowBasic
- $pustoy = $pustoy.AllowBasic
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service" |Select-Object AllowBasic
+ $policyValue = $policyValue.AllowBasic
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "WRR" + "18.10.89.2.2"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Allow remote server management through WinRM' is set to 'Disabled', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Allow remote server management through WinRM' is set to 'Disabled', value must be 0" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service" |Select-Object AllowAutoConfig
- $pustoy = $pustoy.AllowAutoConfig
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service" |Select-Object AllowAutoConfig
+ $policyValue = $policyValue.AllowAutoConfig
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "WRR" + "18.10.89.2.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow unencrypted traffic' is set to 'Disabled', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow unencrypted traffic' is set to 'Disabled', value must be 0" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service" |Select-Object AllowUnencryptedTraffic
- $pustoy = $pustoy.AllowUnencryptedTraffic
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service" |Select-Object AllowUnencryptedTraffic
+ $policyValue = $policyValue.AllowUnencryptedTraffic
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "WRR" + "18.10.89.2.4"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Disallow WinRM from storing RunAs credentials' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Disallow WinRM from storing RunAs credentials' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service" |Select-Object DisableRunAs
- $pustoy = $pustoy.DisableRunAs
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service" |Select-Object DisableRunAs
+ $policyValue = $policyValue.DisableRunAs
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Windows Remote Shell audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "WRS" + "18.10.90.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Allow Remote Shell Access' is set to 'Disabled, value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Allow Remote Shell Access' is set to 'Disabled, value must be 0" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service\WinRS" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service\WinRS" |Select-Object AllowRemoteShellAccess
- $pustoy = $pustoy.AllowRemoteShellAccess
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service\WinRS" |Select-Object AllowRemoteShellAccess
+ $policyValue = $policyValue.AllowRemoteShellAccess
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Windows Sandbox audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "WS" + "18.10.90.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow clipboard sharing with Windows Sandbox' is set to 'Disabled' value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow clipboard sharing with Windows Sandbox' is set to 'Disabled' value must be 0" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Sandbox" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Sandbox" |Select-Object AllowClipboardRedirection
- $pustoy = $pustoy.AllowClipboardRedirection
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Sandbox" |Select-Object AllowClipboardRedirection
+ $policyValue = $policyValue.AllowClipboardRedirection
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "WS" + "18.10.90.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Allow networking in Windows Sandbox' is set to 'Disabled', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Allow networking in Windows Sandbox' is set to 'Disabled', value must be 0" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Sandbox" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Sandbox" |Select-Object AllowNetworking
- $pustoy = $pustoy.AllowNetworking
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Sandbox" |Select-Object AllowNetworking
+ $policyValue = $policyValue.AllowNetworking
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -9091,16 +8067,14 @@ Write-Host "#########>Begin App and browser protection audit<#########" -Foregro
 
 
 $id = "ABP" + "18.10.92.2.1"
-$nulevoy = "$id" + ";" + "(L1) Ensure 'Prevent users from modifying settings' is set to 'Enabled', value must be 1 " + ";"
+$outputLine = "$id" + ";" + "(L1) Ensure 'Prevent users from modifying settings' is set to 'Enabled', value must be 1 " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender Security Center\App and Browser protection"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender Security Center\App and Browser protection" |Select-Object DisallowExploitProtectionOverride
- $pustoy = $pustoy.DisallowExploitProtectionOverride
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender Security Center\App and Browser protection" |Select-Object DisallowExploitProtectionOverride
+ $policyValue = $policyValue.DisallowExploitProtectionOverride
  }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -9110,186 +8084,166 @@ Write-Host "#########>Begin Windows Update audit<#########" -ForegroundColor Dar
 
 
 $id = "WU" + "18.10.93.2.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure Automatic Updates' is set to 'Enabled', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure Automatic Updates' is set to 'Enabled', value must be 0" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" |Select-Object NoAutoUpdate
- $pustoy = $pustoy.NoAutoUpdate
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" |Select-Object NoAutoUpdate
+ $policyValue = $policyValue.NoAutoUpdate
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "WU" + "18.10.93.2.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure Automatic Updates: Scheduled install day' is set to '0 - Every day'', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure Automatic Updates: Scheduled install day' is set to '0 - Every day'', value must be 0" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" |Select-Object ScheduledInstallDay
- $pustoy = $pustoy.ScheduledInstallDay
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" |Select-Object ScheduledInstallDay
+ $policyValue = $policyValue.ScheduledInstallDay
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 $id = "WU" + "18.10.93.2.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Remove access to AAAasAA...aPause updatesAAAasAAA feature' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Remove access to AAAasAA...aPause updatesAAAasAAA feature' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object SetDisablePauseUXAccess
- $pustoy = $pustoy.SetDisablePauseUXAccess
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object SetDisablePauseUXAccess
+ $policyValue = $policyValue.SetDisablePauseUXAccess
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
 
 $id = "WU" + "18.10.93.4.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Manage preview builds' is set to 'Enabled: Disable preview builds' value must be 0 foreach key" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Manage preview builds' is set to 'Enabled: Disable preview builds' value must be 0 foreach key" + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object ManagePreviewBuilds
- $pustoy = $pustoy.ManagePreviewBuilds
- $pustoytemp = "ManagePreviewBuilds" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object ManagePreviewBuildsPolicyValue
- $pustoy = $pustoy.ManagePreviewBuildsPolicyValue
- $pustoytemp += "ManagePreviewBuildsPolicyValue" + ":" + "$pustoy" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object ManagePreviewBuilds
+ $policyValue = $policyValue.ManagePreviewBuilds
+ $policyValueBuffer = "ManagePreviewBuilds" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object ManagePreviewBuildsPolicyValue
+ $policyValue = $policyValue.ManagePreviewBuildsPolicyValue
+ $policyValueBuffer += "ManagePreviewBuildsPolicyValue" + ":" + "$policyValue" + "|"
 }
 else {
- $pustoytemp = "no configuration"
+ $policyValueBuffer = "no configuration"
 }
-$nulevoy += $pustoytemp
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValueBuffer
+$outputLine>> $fname
 
 $id = "WU" + "18.10.93.4.2"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Select when Feature Updates are received' is set to 'Enabled: Current Branch for Business, 180 days' " + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Select when Feature Updates are received' is set to 'Enabled: Current Branch for Business, 180 days' " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object DeferFeatureUpdates
- $pustoy = $pustoy.DeferFeatureUpdates
- $pustoytemp = "DeferFeatureUpdates" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object DeferFeatureUpdatesPeriodInDays
- $pustoy = $pustoy.DeferFeatureUpdatesPeriodInDays
- $pustoytemp += "DeferFeatureUpdatesPeriodInDays" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object BranchReadinessLevel
- $pustoy = $pustoy.BranchReadinessLevel
- $pustoytemp += "BranchReadinessLevel" + ":" + "$pustoy" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object DeferFeatureUpdates
+ $policyValue = $policyValue.DeferFeatureUpdates
+ $policyValueBuffer = "DeferFeatureUpdates" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object DeferFeatureUpdatesPeriodInDays
+ $policyValue = $policyValue.DeferFeatureUpdatesPeriodInDays
+ $policyValueBuffer += "DeferFeatureUpdatesPeriodInDays" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object BranchReadinessLevel
+ $policyValue = $policyValue.BranchReadinessLevel
+ $policyValueBuffer += "BranchReadinessLevel" + ":" + "$policyValue" + "|"
 }
 else {
- $pustoytemp = "no configuration"
+ $policyValueBuffer = "no configuration"
 }
-$nulevoy += $pustoytemp
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValueBuffer
+$outputLine>> $fname
 
 
 
 $id = "WU" + "18.10.93.4.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Select when Quality Updates are received' is set to 'Enabled: 0 days''''' " + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Select when Quality Updates are received' is set to 'Enabled: 0 days''''' " + ";"
 $exist = Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object DeferQualityUpdates
- $pustoy = $pustoy.DeferQualityUpdates
- $pustoytemp = "DeferQualityUpdates" + ":" + "$pustoy" + "|"
- $pustoy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object DeferQualityUpdatesPeriodInDays
- $pustoy = $pustoy.DeferQualityUpdatesPeriodInDays
- $pustoytemp += "DeferQualityUpdatesPeriodInDays" + ":" + "$pustoy" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object DeferQualityUpdates
+ $policyValue = $policyValue.DeferQualityUpdates
+ $policyValueBuffer = "DeferQualityUpdates" + ":" + "$policyValue" + "|"
+ $policyValue = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" |Select-Object DeferQualityUpdatesPeriodInDays
+ $policyValue = $policyValue.DeferQualityUpdatesPeriodInDays
+ $policyValueBuffer += "DeferQualityUpdatesPeriodInDays" + ":" + "$policyValue" + "|"
 }
 else {
- $pustoytemp = "no configuration"
+ $policyValueBuffer = "no configuration"
 }
-$nulevoy += $pustoytemp
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValueBuffer
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Personalization audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "PERS" + "19.1.3.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Enable screen saver' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Enable screen saver' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Control Panel\Desktop"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Control Panel\Desktop" |Select-Object ScreenSaveActive
- $pustoy = $pustoy.ScreenSaveActive
+ $policyValue = Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Control Panel\Desktop" |Select-Object ScreenSaveActive
+ $policyValue = $policyValue.ScreenSaveActive
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "PERS" + "19.1.3.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Password protect the screen saver' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Password protect the screen saver' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Control Panel\Desktop"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Control Panel\Desktop" |Select-Object ScreenSaverIsSecure
- $pustoy = $pustoy.ScreenSaverIsSecure
+ $policyValue = Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Control Panel\Desktop" |Select-Object ScreenSaverIsSecure
+ $policyValue = $policyValue.ScreenSaverIsSecure
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "PERS" + "19.1.3.3"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Screen saver timeout' is set to 'Enabled: 900 seconds or fewer, but not 0', value must be 900 or less but not 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Screen saver timeout' is set to 'Enabled: 900 seconds or fewer, but not 0', value must be 900 or less but not 0" + ";"
 $exist = Test-Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Control Panel\Desktop"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Control Panel\Desktop" |Select-Object ScreenSaveTimeOut
- $pustoy = $pustoy.ScreenSaveTimeOut
+ $policyValue = Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Control Panel\Desktop" |Select-Object ScreenSaveTimeOut
+ $policyValue = $policyValue.ScreenSaveTimeOut
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Notifications audit<#########" -ForegroundColor DarkGreen
 
 $id = "NOTIF" + "19.5.1.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn off toast notifications on the lock screen' is set to 'Enabled, value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn off toast notifications on the lock screen' is set to 'Enabled, value must be 1" + ";"
 $exist = Test-Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PushNotifications"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PushNotifications" |Select-Object NoToastApplicationNotificationOnLockScreen
- $pustoy = $pustoy.NoToastApplicationNotificationOnLockScreen
+ $policyValue = Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PushNotifications" |Select-Object NoToastApplicationNotificationOnLockScreen
+ $policyValue = $policyValue.NoToastApplicationNotificationOnLockScreen
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -9297,54 +8251,48 @@ Write-Host "#########>Begin Internet Communication Management audit<#########" -
 
 
 $id = "ICC" + "19.6.6.1.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Turn off Help Experience Improvement Program' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Turn off Help Experience Improvement Program' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKCU:\SOFTWARE\Policies\Microsoft\Assistance\Client\1.0" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\Assistance\Client\1.0" |Select-Object NoImplicitFeedback
- $pustoy = $pustoy.NoImplicitFeedback
+ $policyValue = Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\Assistance\Client\1.0" |Select-Object NoImplicitFeedback
+ $policyValue = $policyValue.NoImplicitFeedback
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Attachment Manager audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "ATTM" + "19.7.4.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Do not preserve zone information in file attachments' is set to 'Disabled', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Do not preserve zone information in file attachments' is set to 'Disabled', value must be 0" + ";"
 $exist = Test-Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Attachments"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Attachments" |Select-Object SaveZoneInformation
- $pustoy = $pustoy.SaveZoneInformation
+ $policyValue = Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Attachments" |Select-Object SaveZoneInformation
+ $policyValue = $policyValue.SaveZoneInformation
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "ATTM" + "19.7.4.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Notify antivirus programs when opening attachments' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Notify antivirus programs when opening attachments' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Attachments" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Attachments" |Select-Object ScanWithAntiVirus
- $pustoy = $pustoy.ScanWithAntiVirus
+ $policyValue = Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Attachments" |Select-Object ScanWithAntiVirus
+ $policyValue = $policyValue.ScanWithAntiVirus
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -9352,80 +8300,70 @@ Write-Host "#########>Begin Cloud Content audit<#########" -ForegroundColor Dark
 
 
 $id = "CLOUDC" + "19.7.7.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Configure Windows spotlight on lock screen' is set to Disabled, value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Configure Windows spotlight on lock screen' is set to Disabled, value must be 0" + ";"
 $exist = Test-Path "HKCU:\Software\Policies\Microsoft\Windows\CloudContent"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\Software\Policies\Microsoft\Windows\CloudContent" |Select-Object ConfigureWindowsSpotlight
- $pustoy = $pustoy.ConfigureWindowsSpotlight
+ $policyValue = Get-ItemProperty "HKCU:\Software\Policies\Microsoft\Windows\CloudContent" |Select-Object ConfigureWindowsSpotlight
+ $policyValue = $policyValue.ConfigureWindowsSpotlight
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "CLOUDC" + "19.7.7.2"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Do not suggest third-party content in Windows spotlight' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Do not suggest third-party content in Windows spotlight' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKCU:\Software\Policies\Microsoft\Windows\CloudContent"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\Software\Policies\Microsoft\Windows\CloudContent" |Select-Object DisableThirdPartySuggestions
- $pustoy = $pustoy.DisableThirdPartySuggestions
+ $policyValue = Get-ItemProperty "HKCU:\Software\Policies\Microsoft\Windows\CloudContent" |Select-Object DisableThirdPartySuggestions
+ $policyValue = $policyValue.DisableThirdPartySuggestions
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 $id = "CLOUDC" + "19.7.7.3"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Do not use diagnostic data for tailored experiences' is set to 'Enabled'', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Do not use diagnostic data for tailored experiences' is set to 'Enabled'', value must be 1" + ";"
 $exist = Test-Path "HKCU:\Software\Policies\Microsoft\Windows\CloudContent"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\Software\Policies\Microsoft\Windows\CloudContent" |Select-Object DisableTailoredExperiencesWithDiagnosticData
- $pustoy = $pustoy.DisableTailoredExperiencesWithDiagnosticData
+ $policyValue = Get-ItemProperty "HKCU:\Software\Policies\Microsoft\Windows\CloudContent" |Select-Object DisableTailoredExperiencesWithDiagnosticData
+ $policyValue = $policyValue.DisableTailoredExperiencesWithDiagnosticData
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "CLOUDC" + "19.7.7.4"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Turn off all Windows spotlight features' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Turn off all Windows spotlight features' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKCU:\Software\Policies\Microsoft\Windows\CloudContent" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\Software\Policies\Microsoft\Windows\CloudContent" |Select-Object DisableWindowsSpotlightFeatures
- $pustoy = $pustoy.DisableWindowsSpotlightFeatures
+ $policyValue = Get-ItemProperty "HKCU:\Software\Policies\Microsoft\Windows\CloudContent" |Select-Object DisableWindowsSpotlightFeatures
+ $policyValue = $policyValue.DisableWindowsSpotlightFeatures
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 $id = "CLOUDC" + "19.7.7.5"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Turn off Spotlight collection on Desktop' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Turn off Spotlight collection on Desktop' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKCU:\Software\Policies\Microsoft\Windows\CloudContent" 
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\Software\Policies\Microsoft\Windows\CloudContent" |Select-Object DisableSpotlightCollectionOnDesktop
- $pustoy = $pustoy.DisableSpotlightCollectionOnDesktop
+ $policyValue = Get-ItemProperty "HKCU:\Software\Policies\Microsoft\Windows\CloudContent" |Select-Object DisableSpotlightCollectionOnDesktop
+ $policyValue = $policyValue.DisableSpotlightCollectionOnDesktop
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -9436,19 +8374,17 @@ Write-Host "#########>Begin Network Sharing audit<#########" -ForegroundColor Da
 
 
 $id = "NSHARE" + "19.7.25.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Prevent users from sharing files within their profile.' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Prevent users from sharing files within their profile.' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" |Select-Object NoInplaceSharing
- $pustoy = $pustoy.NoInplaceSharing
+ $policyValue = Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" |Select-Object NoInplaceSharing
+ $policyValue = $policyValue.NoInplaceSharing
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 
@@ -9457,40 +8393,39 @@ Write-Host "#########>Begin User Windows Installer audit<#########" -ForegroundC
 
 
 $id = "UWI" + "19.7.40.1"
-$nulevoy = "$id" + ";" + "(L1)Ensure 'Always install with elevated privileges' is set to 'Disabled', value must be 0" + ";"
+$outputLine = "$id" + ";" + "(L1)Ensure 'Always install with elevated privileges' is set to 'Disabled', value must be 0" + ";"
 $exist = Test-Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer" |Select-Object AlwaysInstallElevated
- $pustoy = $pustoy.AlwaysInstallElevated
+ $policyValue = Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer" |Select-Object AlwaysInstallElevated
+ $policyValue = $policyValue.AlwaysInstallElevated
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 
 
 Write-Host "#########>Begin Playback audit<#########" -ForegroundColor DarkGreen
 
 
 $id = "PLB" + "19.7.42.2.1"
-$nulevoy = "$id" + ";" + "(L2)Ensure 'Prevent Codec Download' is set to 'Enabled', value must be 1" + ";"
+$outputLine = "$id" + ";" + "(L2)Ensure 'Prevent Codec Download' is set to 'Enabled', value must be 1" + ";"
 $exist = Test-Path "HKCU:\SOFTWARE\Policies\Microsoft\WindowsMediaPlayer"
 if ( $exist -eq $true) {
- $pustoy = Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\WindowsMediaPlayer" |Select-Object PreventCodecDownload
- $pustoy = $pustoy.PreventCodecDownload
+ $policyValue = Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\WindowsMediaPlayer" |Select-Object PreventCodecDownload
+ $policyValue = $policyValue.PreventCodecDownload
 
 }
 else {
- $pustoy = "no configuration"
+ $policyValue = "no configuration"
 }
-$nulevoy += $pustoy
-$nulevoy>> $fname
-Clean-Value($nulevoy)
-Clean-Value($pustoy)
+$outputLine += $policyValue
+$outputLine>> $fname
 Write-Host "#########>END Audit<#########" -ForegroundColor DarkGreen
 Set-Location ..
+
+
+
 
 
