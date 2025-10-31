@@ -85,7 +85,7 @@ Currently only tested on Windows 11.
 
 ### Example of an audit export:
 
-## Preview: [Sample audit report](docs/sample_audit.pdf)
+## Preview: [Sample audit report](docs/sample_audit.png)
 
 
 📋 Requirements
@@ -115,3 +115,4 @@ If secedit logs fail, the tool will automatically fall back and grab the data. N
 ## Support
 
 Need help or spot a bug? [Open an issue](https://github.com/sweetenloe/omniwin-auditor/issues).
+
